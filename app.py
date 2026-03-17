@@ -12,11 +12,7 @@ st.set_page_config(page_title="Temu店铺数据分析工具", layout="wide")
 st.title("📊 Temu 店铺数据分析工具（双月对比+销量分析版）")
 
 # --- 初始化session状态 ---
-# 密码相关
-if 'custom_password' not in st.session_state:
-    st.session_state.custom_password = "123456"
-if 'password_updated' not in st.session_state:
-    st.session_state.password_updated = False
+# 登录状态
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 
@@ -34,56 +30,51 @@ if 'metrics_current' not in st.session_state:
 if 'metrics_last' not in st.session_state:
     st.session_state.metrics_last = None    # 上月计算指标
 
-# 自定义警戒值session（核心新增）
+# 自定义警戒值session
 if 'alert_config' not in st.session_state:
     st.session_state.alert_config = {
         "ORDER_MARGIN_RATE_THRESHOLD": 20.0,    # 订单毛利率警戒值
         "OPERATE_MARGIN_RATE_THRESHOLD": 15.0,  # 运营毛利率警戒值
         "SALES_QUANTITY_THRESHOLD": 100,        # 销售数量警戒值
-        "UNIT_PRICE_THRESHOLD": 50.0,           # 客单价警戒值（原均单价）
-        "UNIT_PROFIT_THRESHOLD": 10.0           # 均单利润警戒值（原均单收入）
+        "UNIT_PRICE_THRESHOLD": 50.0,           # 客单价警戒值
+        "UNIT_PROFIT_THRESHOLD": 10.0           # 均单利润警戒值
     }
 
 CONFIG = {
     "SUPPORTED_FILE_TYPES": ["xlsx", "csv"],
     "ENCODING": "utf-8",
     "DECIMAL_PLACES": 2,
-    "DEFAULT_PASSWORD": "123456"
+    "FIXED_PASSWORD": "123456"  # 固定密码，不可修改
 }
 
 # ===================== 密码验证函数 =====================
 def check_password():
-    pwd = st.text_input("🔒 请输入访问密码", type="password", key="pwd_input")
-    if pwd == st.session_state.custom_password:
-        st.session_state.authenticated = True
-        st.success("✅ 密码正确，解锁全部功能！")
-    elif pwd != "":
-        st.error("❌ 密码错误，请重试！")
-    return st.session_state.authenticated
-
-def update_password():
-    st.subheader("🔐 密码设置")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        old_pwd = st.text_input("当前密码", type="password", key="old_pwd")
-    with col2:
-        new_pwd = st.text_input("新密码", type="password", key="new_pwd")
-    with col3:
-        confirm_pwd = st.text_input("确认新密码", type="password", key="confirm_pwd")
+    """简单的密码验证，密码固定为123456"""
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🔐 登录")
     
-    if st.button("保存新密码", key="save_pwd"):
-        if old_pwd != st.session_state.custom_password:
-            st.error("❌ 当前密码输入错误！")
-        elif new_pwd != confirm_pwd:
-            st.error("❌ 两次输入的新密码不一致！")
-        elif len(new_pwd) < 6:
-            st.error("❌ 新密码长度不能少于6位！")
+    # 如果已经登录，直接返回True
+    if st.session_state.authenticated:
+        st.sidebar.success("✅ 已登录")
+        if st.sidebar.button("退出登录"):
+            st.session_state.authenticated = False
+            st.rerun()
+        return True
+    
+    # 未登录则显示密码输入框
+    pwd = st.sidebar.text_input("请输入访问密码", type="password", key="login_pwd")
+    
+    if st.sidebar.button("登录"):
+        if pwd == CONFIG["FIXED_PASSWORD"]:
+            st.session_state.authenticated = True
+            st.success("✅ 密码正确，欢迎使用！")
+            st.rerun()
         else:
-            st.session_state.custom_password = new_pwd
-            st.session_state.password_updated = True
-            st.success(f"✅ 密码修改成功！")
+            st.sidebar.error("❌ 密码错误！")
+    
+    return False
 
-# ===================== 核心新增：自定义警戒值设置函数 =====================
+# ===================== 自定义警戒值设置函数 =====================
 def render_alert_config_panel():
     st.subheader("⚙️ 自定义警戒值设置")
     st.info("修改后点击【保存设置】生效，所有分析页面将使用新的警戒值判断")
@@ -175,8 +166,8 @@ def calculate_margin_ratio(numerator, denominator) -> float | pd.Series:
                         round((numerator / denominator * 100), CONFIG["DECIMAL_PLACES"]))
     return 0.0
 
-# 🔴 新增：根据警戒值标红的样式函数
-def highlight_below_threshold(val, threshold, is_percentage=False):
+# 根据警戒值标红的样式函数
+def highlight_below_threshold(val, threshold):
     """如果数值低于阈值，返回红色背景样式"""
     try:
         if pd.isna(val) or val == 0:
@@ -229,7 +220,7 @@ def highlight_threshold_values(df, alert_config):
     
     return styled_df
 
-# 核心修改：将均单价改为客单价，均单收入改为均单利润，并删除单均收入字段
+# 计算单均指标
 def calculate_sales_per_unit(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     if '销售数量' not in df.columns:
@@ -239,14 +230,13 @@ def calculate_sales_per_unit(df: pd.DataFrame) -> pd.DataFrame:
     df['销售数量'] = df['销售数量'].replace(0, np.nan)
     sales_quantity = df['销售数量']
     
-    # 🔴 删除：单均收入(元/单)字段
-    # 保留单均订单毛利和单均商品成本
+    # 单均订单毛利和单均商品成本
     df['单均订单毛利(元/单)'] = np.where(sales_quantity.notna(),
                                       round(df['订单毛利'] / sales_quantity, CONFIG["DECIMAL_PLACES"]), 0.0)
     df['单均商品成本(元/单)'] = np.where(sales_quantity.notna(),
                                      round(df['商品成本'] / sales_quantity, CONFIG["DECIMAL_PLACES"]), 0.0)
     
-    # 🔴 修改：客单价（原均单价）、均单利润（原均单收入）
+    # 客单价、均单利润
     df['客单价(元/单)'] = np.where(sales_quantity.notna(),
                                 round(df['交易收入'] / sales_quantity, CONFIG["DECIMAL_PLACES"]), 0.0)
     df['均单利润(元/单)'] = np.where(sales_quantity.notna() & df['运营毛利'].notna(),
@@ -309,7 +299,7 @@ def generate_upload_template() -> bytes:
     output.seek(0)
     return output.getvalue()
 
-# ===================== 核心计算函数（修改指标名称） =====================
+# ===================== 核心计算函数 =====================
 def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
     if df is None or df.empty:
         return None
@@ -329,10 +319,8 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
         "头程运费占比": 0.0, "退回运费占比": 0.0, "罚款金额占比": 0.0,
         "店铺总计提占比": 0.0, "售后净额占比": 0.0,
         "销售数量总计": 0,
-        # 🔴 删除：单均收入(元/单)
         "单均订单毛利(元/单)": 0.0,
         "单均商品成本(元/单)": 0.0,
-        # 🔴 修改：客单价、均单利润
         "客单价(元/单)": 0.0,
         "均单利润(元/单)": 0.0,
         "has_sales_quantity": '销售数量' in df.columns,
@@ -382,14 +370,11 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
             sales_series = df['销售数量'].fillna(0)
             metrics["销售数量总计"] = int(sales_series.sum())
             if metrics["销售数量总计"] > 0:
-                # 🔴 删除：单均收入(元/单)
                 metrics["单均订单毛利(元/单)"] = round(metrics["订单毛利"] / metrics["销售数量总计"], CONFIG["DECIMAL_PLACES"])
                 metrics["单均商品成本(元/单)"] = round(metrics["商品成本"] / metrics["销售数量总计"], CONFIG["DECIMAL_PLACES"])
-                # 🔴 修改：客单价、均单利润
                 metrics["客单价(元/单)"] = round(metrics["交易收入"] / metrics["销售数量总计"], CONFIG["DECIMAL_PLACES"])
                 metrics["均单利润(元/单)"] = round(metrics["运营毛利"] / metrics["销售数量总计"], CONFIG["DECIMAL_PLACES"])
         except Exception as e:
-            # 无销售数量时跳过，不报错
             metrics["销售数量总计"] = 0
             st.warning(f"⚠️ 销售数量字段格式异常，已跳过销量相关指标计算：{str(e)}")
 
@@ -413,10 +398,8 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
         if metrics["has_sales_quantity"]:
             agg_cols.update({
                 '销售数量': 'sum',
-                # 🔴 删除：单均收入(元/单)
                 '单均订单毛利(元/单)': lambda x: round(x.mean(), CONFIG["DECIMAL_PLACES"]),
                 '单均商品成本(元/单)': lambda x: round(x.mean(), CONFIG["DECIMAL_PLACES"]),
-                # 🔴 修改：客单价、均单利润
                 '客单价(元/单)': lambda x: round(x.mean(), CONFIG["DECIMAL_PLACES"]),
                 '均单利润(元/单)': lambda x: round(x.mean(), CONFIG["DECIMAL_PLACES"]),
                 '订单毛利率(%)': lambda x: round(x.mean(), CONFIG["DECIMAL_PLACES"]),
@@ -426,7 +409,7 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
         shop_agg['店铺数量'] = shop_agg['店铺数量'].astype(int)
         if metrics["has_sales_quantity"]:
             shop_agg['销售数量'] = shop_agg['销售数量'].fillna(0).astype(int)
-        # 补充毛利率计算（确保存在）
+        # 补充毛利率计算
         shop_agg['订单毛利率(%)'] = calculate_margin_ratio(shop_agg['订单毛利'], shop_agg['交易收入'])
         shop_agg['运营毛利率(%)'] = calculate_margin_ratio(shop_agg['运营毛利'], shop_agg['交易收入'])
         shop_agg['商品成本占比(%)'] = calculate_margin_ratio(shop_agg['商品成本'], shop_agg['交易收入'])
@@ -460,10 +443,8 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
         if metrics["has_sales_quantity"]:
             agg_cols.update({
                 '销售数量': 'sum',
-                # 🔴 删除：单均收入(元/单)
                 '单均订单毛利(元/单)': lambda x: round(x.mean(), CONFIG["DECIMAL_PLACES"]),
                 '单均商品成本(元/单)': lambda x: round(x.mean(), CONFIG["DECIMAL_PLACES"]),
-                # 🔴 修改：客单价、均单利润
                 '客单价(元/单)': lambda x: round(x.mean(), CONFIG["DECIMAL_PLACES"]),
                 '均单利润(元/单)': lambda x: round(x.mean(), CONFIG["DECIMAL_PLACES"]),
                 '订单毛利率(%)': lambda x: round(x.mean(), CONFIG["DECIMAL_PLACES"]),
@@ -473,7 +454,7 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
         sales_agg['店铺数量'] = sales_agg['店铺数量'].astype(int)
         if metrics["has_sales_quantity"]:
             sales_agg['销售数量'] = sales_agg['销售数量'].fillna(0).astype(int)
-        # 补充毛利率计算（确保存在）
+        # 补充毛利率计算
         sales_agg['订单毛利率(%)'] = calculate_margin_ratio(sales_agg['订单毛利'], sales_agg['交易收入'])
         sales_agg['运营毛利率(%)'] = calculate_margin_ratio(sales_agg['运营毛利'], sales_agg['交易收入'])
         sales_agg['罚款占收入比(%)'] = calculate_margin_ratio(sales_agg['罚款金额'], sales_agg['交易收入'])
@@ -489,9 +470,8 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
 
     return metrics
 
-# ===================== 可视化函数（适配自定义警戒值） =====================
+# ===================== 可视化函数 =====================
 def plot_margin_chart(df: pd.DataFrame, y_col: str, title: str, threshold_key: str, selected_items=None):
-    # 使用自定义警戒值
     threshold = st.session_state.alert_config[threshold_key]
     if selected_items:
         df = df.loc[selected_items]
@@ -517,23 +497,20 @@ def plot_cost_ratio_chart(df: pd.DataFrame, title: str, selected_items=None):
     return fig
 
 def plot_sales_quantity_chart(df: pd.DataFrame, title: str, selected_items=None):
-    # 使用自定义销售数量警戒值
     threshold = st.session_state.alert_config["SALES_QUANTITY_THRESHOLD"]
     if selected_items:
         df = df.loc[selected_items]
     df = df.sort_values('销售数量', ascending=False)
-    fig = px.bar(df, x=df.index, y='销售数量', title=title, text_auto=True, color_continuous_scale='Blues')
+    fig = px.bar(df, x=df.index, y='销售数量', title=title, text_auto=True)
     fig.update_traces(text=df['销售数量'].apply(lambda x: f"{x:,}"), textposition='outside',
                       marker_color=['#d62728' if x < threshold else '#2ca02c' for x in df['销售数量']])
     fig.add_hline(y=threshold, line_dash="dash", line_color="orange", annotation_text=f"达标线({threshold}单)")
     fig.update_layout(yaxis_title='销售数量（单）', height=500)
     return fig
 
-# 🔴 修改：客单价、均单利润可视化
 def plot_unit_metrics_chart(df: pd.DataFrame, title: str, selected_items=None):
     if selected_items:
         df = df.loc[selected_items]
-    # 获取自定义警戒值
     unit_price_threshold = st.session_state.alert_config["UNIT_PRICE_THRESHOLD"]
     unit_profit_threshold = st.session_state.alert_config["UNIT_PROFIT_THRESHOLD"]
     
@@ -547,22 +524,18 @@ def plot_unit_metrics_chart(df: pd.DataFrame, title: str, selected_items=None):
                          marker_color=['#FF8C00' if x < unit_profit_threshold else '#006400' for x in df['均单利润(元/单)']],
                          text=df['均单利润(元/单)'].apply(lambda x: f"¥{x:.2f}"), textposition='outside'))
     fig.update_layout(title=title, barmode='group', height=600, yaxis_title='金额(元/单)')
-    # 添加警戒值线
     fig.add_hline(y=unit_price_threshold, line_dash="dash", line_color="red", annotation_text=f"客单价警戒值({unit_price_threshold}元)")
     fig.add_hline(y=unit_profit_threshold, line_dash="dash", line_color="orange", annotation_text=f"均单利润警戒值({unit_profit_threshold}元)")
     return fig
 
-# 🔴 修改：删除单均收入字段
 def plot_sales_unit_metrics_chart(df: pd.DataFrame, title: str, selected_items=None):
     if selected_items:
         df = df.loc[selected_items]
     fig = go.Figure()
-    # 🔴 删除：单均收入
     fig.add_trace(go.Bar(x=df.index, y=df['单均订单毛利(元/单)'], name='单均订单毛利', marker_color='#FFD700',
                          text=df['单均订单毛利(元/单)'].apply(lambda x: f"¥{x:.2f}"), textposition='outside'))
     fig.add_trace(go.Bar(x=df.index, y=df['单均商品成本(元/单)'], name='单均商品成本', marker_color='#DC143C',
                          text=df['单均商品成本(元/单)'].apply(lambda x: f"¥{x:.2f}"), textposition='outside'))
-    # 🔴 修改：客单价、均单利润展示
     if '客单价(元/单)' in df.columns:
         fig.add_trace(go.Bar(x=df.index, y=df['客单价(元/单)'], name='客单价', marker_color='#8A2BE2',
                              text=df['客单价(元/单)'].apply(lambda x: f"¥{x:.2f}"), textposition='outside'))
@@ -572,7 +545,7 @@ def plot_sales_unit_metrics_chart(df: pd.DataFrame, title: str, selected_items=N
     fig.update_layout(title=title, barmode='group', height=600)
     return fig
 
-# ===================== 页面渲染函数（适配新指标+自定义警戒值） =====================
+# ===================== 页面渲染函数 =====================
 def render_monthly_analysis(metrics: Dict, df: pd.DataFrame):
     st.subheader(f"📈 {metrics['周期']} 核心数据")
     c1,c2,c3 = st.columns(3)
@@ -589,7 +562,6 @@ def render_monthly_analysis(metrics: Dict, df: pd.DataFrame):
         st.metric("耗材成本占比", f"{metrics['耗材成本占比']:.2f}%")
         st.metric("头程运费占比", f"{metrics['头程运费占比']:.2f}%")
     with c3:
-        # 使用自定义警戒值判断
         o_rate = metrics["订单毛利率"]
         op_rate = metrics["运营毛利率"]
         order_threshold = st.session_state.alert_config["ORDER_MARGIN_RATE_THRESHOLD"]
@@ -610,13 +582,11 @@ def render_monthly_analysis(metrics: Dict, df: pd.DataFrame):
             st.metric("销售数量总计", f"{metrics['销售数量总计']:,} 单",
                       delta=f"＜{sales_threshold} 单 偏低" if metrics['销售数量总计']<sales_threshold else f"≥{sales_threshold} 单 正常",
                       delta_color="inverse" if metrics['销售数量总计']<sales_threshold else "normal")
-            # 🔴 删除：单均收入
         else:
             st.metric("提示", "无销售数量数据")
             st.metric("-", "-")
     with c5:
         if metrics["has_sales_quantity"]:
-            # 🔴 修改：客单价、均单利润指标展示
             unit_price_threshold = st.session_state.alert_config["UNIT_PRICE_THRESHOLD"]
             unit_profit_threshold = st.session_state.alert_config["UNIT_PROFIT_THRESHOLD"]
             
@@ -645,7 +615,6 @@ def render_monthly_analysis(metrics: Dict, df: pd.DataFrame):
             shop_df['销售数量'] = shop_df['销售数量'].fillna(0).astype(int)
         shops = st.multiselect("选择店铺", list(shop_df.index), default=list(shop_df.index)[:5])
         if shops:
-            # 🔴 应用阈值标红样式
             styled_shop_df = highlight_threshold_values(shop_df.loc[shops], st.session_state.alert_config)
             st.dataframe(styled_shop_df, use_container_width=True)
             
@@ -654,7 +623,6 @@ def render_monthly_analysis(metrics: Dict, df: pd.DataFrame):
             if metrics["has_sales_quantity"]:
                 st.plotly_chart(plot_sales_quantity_chart(shop_df, '店铺销售数量排名', shops), use_container_width=True)
                 st.plotly_chart(plot_sales_unit_metrics_chart(shop_df, '店铺单均/客单价/均单利润指标', shops), use_container_width=True)
-                # 🔴 修改：客单价、均单利润单独可视化
                 st.plotly_chart(plot_unit_metrics_chart(shop_df, '店铺客单价&均单利润对比', shops), use_container_width=True)
 
     if metrics["sales_data"]:
@@ -665,7 +633,6 @@ def render_monthly_analysis(metrics: Dict, df: pd.DataFrame):
             sales_df['销售数量'] = sales_df['销售数量'].fillna(0).astype(int)
         sales = st.multiselect("选择销售员", list(sales_df.index), default=list(sales_df.index)[:5])
         if sales:
-            # 🔴 应用阈值标红样式
             styled_sales_df = highlight_threshold_values(sales_df.loc[sales], st.session_state.alert_config)
             st.dataframe(styled_sales_df, use_container_width=True)
             
@@ -673,13 +640,11 @@ def render_monthly_analysis(metrics: Dict, df: pd.DataFrame):
             if metrics["has_sales_quantity"]:
                 st.plotly_chart(plot_sales_quantity_chart(sales_df, '销售员销量排名', sales), use_container_width=True)
                 st.plotly_chart(plot_sales_unit_metrics_chart(sales_df, '销售员单均/客单价/均单利润指标', sales), use_container_width=True)
-                # 🔴 修改：客单价、均单利润单独可视化
                 st.plotly_chart(plot_unit_metrics_chart(sales_df, '销售员客单价&均单利润对比', sales), use_container_width=True)
 
         st.subheader("📌 运营建议")
         for name, row in sales_df.iterrows():
             with st.expander(f"🧑‍💼 {name}", expanded=False):
-                # 使用自定义警戒值
                 order_threshold = st.session_state.alert_config["ORDER_MARGIN_RATE_THRESHOLD"]
                 operate_threshold = st.session_state.alert_config["OPERATE_MARGIN_RATE_THRESHOLD"]
                 sales_threshold = st.session_state.alert_config["SALES_QUANTITY_THRESHOLD"]
@@ -705,7 +670,6 @@ def render_monthly_analysis(metrics: Dict, df: pd.DataFrame):
                 
                 if metrics["has_sales_quantity"]:
                     qty = row.get('销售数量',0)
-                    # 🔴 修改：客单价、均单利润
                     unit_price = row.get('客单价(元/单)',0)
                     unit_profit = row.get('均单利润(元/单)',0)
                     
@@ -760,7 +724,7 @@ def render_double_month_analysis(curr: Dict, last: Dict):
             curr["售后净额"], curr["售后净额占比"]
         ]
     }
-    # 新增客单价/均单利润对比，删除单均收入
+    # 新增客单价/均单利润对比
     if curr["has_sales_quantity"] and last["has_sales_quantity"]:
         compare_data["指标名称"].extend([
             "销售数量(单)", "客单价(元/单)", "均单利润(元/单)",
@@ -845,7 +809,7 @@ def render_double_month_analysis(curr: Dict, last: Dict):
             st.error(f"❌ 销售数量环比下降 {abs(qty_diff):,} 单（{abs(qty_rate):.2f}%）")
         else:
             st.info(f"➡️ 销售数量环比无变化")
-        # 🔴 修改：客单价、均单利润差异总结
+        
         unit_price_diff = curr["客单价(元/单)"] - last["客单价(元/单)"]
         unit_price_rate = calculate_margin_ratio(unit_price_diff, last["客单价(元/单)"])
         if unit_price_diff > 0:
@@ -893,7 +857,7 @@ def render_shop_margin_ranking(metrics_current: Dict, metrics_last: Dict) -> Opt
         rank_df["销售数量_上月"] = shop_last["销售数量"].fillna(0).astype(int)
         rank_df["销售数量_本月"] = shop_curr["销售数量"].fillna(0).astype(int)
         rank_df["销量差异"] = rank_df["销售数量_本月"] - rank_df["销售数量_上月"]
-        # 🔴 修改：客单价、均单利润
+        # 客单价、均单利润
         rank_df["客单价_上月(元/单)"] = shop_last["客单价(元/单)"].round(CONFIG["DECIMAL_PLACES"])
         rank_df["客单价_本月(元/单)"] = shop_curr["客单价(元/单)"].round(CONFIG["DECIMAL_PLACES"])
         rank_df["均单利润_上月(元/单)"] = shop_last["均单利润(元/单)"].round(CONFIG["DECIMAL_PLACES"])
@@ -901,7 +865,7 @@ def render_shop_margin_ranking(metrics_current: Dict, metrics_last: Dict) -> Opt
     rank_df = rank_df.sort_values("运营毛利_差异(元)", ascending=False)
     rank_df.insert(0, "排名", range(1, len(rank_df)+1))
     
-    # 🔴 应用阈值标红样式
+    # 应用阈值标红样式
     styled_rank_df = highlight_threshold_values(rank_df, st.session_state.alert_config)
     st.dataframe(
         styled_rank_df,
@@ -941,7 +905,7 @@ def render_sales_margin_ranking(metrics_current: Dict, metrics_last: Dict) -> Op
         rank_df["销售数量_上月"] = sales_last["销售数量"].fillna(0).astype(int)
         rank_df["销售数量_本月"] = sales_curr["销售数量"].fillna(0).astype(int)
         rank_df["销量差异"] = rank_df["销售数量_本月"] - rank_df["销售数量_上月"]
-        # 🔴 修改：客单价、均单利润
+        # 客单价、均单利润
         rank_df["客单价_上月(元/单)"] = sales_last["客单价(元/单)"].round(CONFIG["DECIMAL_PLACES"])
         rank_df["客单价_本月(元/单)"] = sales_curr["客单价(元/单)"].round(CONFIG["DECIMAL_PLACES"])
         rank_df["均单利润_上月(元/单)"] = sales_last["均单利润(元/单)"].round(CONFIG["DECIMAL_PLACES"])
@@ -949,7 +913,7 @@ def render_sales_margin_ranking(metrics_current: Dict, metrics_last: Dict) -> Op
     rank_df = rank_df.sort_values("运营毛利_差异(元)", ascending=False)
     rank_df.insert(0, "排名", range(1, len(rank_df)+1))
     
-    # 🔴 应用阈值标红样式
+    # 应用阈值标红样式
     styled_rank_df = highlight_threshold_values(rank_df, st.session_state.alert_config)
     st.dataframe(
         styled_rank_df,
@@ -1014,23 +978,23 @@ def main():
         st.image("https://img.icons8.com/fluency/96/000000/bar-chart.png", width=100)
         st.title("📌 功能菜单")
         
-        # 新增：自定义警戒值设置板块（你要的功能）
+        # 先进行密码验证
+        if not check_password():
+            st.stop()  # 密码错误或未登录时停止执行后续代码
+        
+        # 密码验证通过后显示菜单
         menu_option = st.radio(
             "选择页面",
             [
                 "📊 单月数据分析",
                 "📈 双月对比分析",
-                "⚙️ 警戒值设置",  # 这里就是你要的自定义警戒板块
-                "🔐 密码修改",
+                "⚙️ 警戒值设置",
                 "📥 下载数据模板",
                 "📜 Temu最新规则解读"
             ]
         )
 
-    if menu_option == "🔐 密码修改":
-        update_password()
-        return
-
+    # 不再需要密码修改功能
     if menu_option == "📥 下载数据模板":
         st.subheader("📥 数据模板下载")
         st.download_button(
@@ -1054,7 +1018,7 @@ def main():
                     st.write(line)
         return
 
-    # 警戒值设置页面（你要的自定义板块）
+    # 警戒值设置页面
     if menu_option == "⚙️ 警戒值设置":
         render_alert_config_panel()
         return
