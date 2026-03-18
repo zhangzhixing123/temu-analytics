@@ -8,6 +8,9 @@ from typing import Dict, Optional
 from io import BytesIO
 import json
 import os
+import tempfile
+from PIL import Image
+import plotly.io as pio
 
 # ===================== 全局配置与常量定义 =====================
 st.set_page_config(page_title="Temu店铺数据分析工具", layout="wide")
@@ -101,7 +104,7 @@ def check_password():
     
     return False
 
-# ===================== 自定义警戒值设置函数（已添加永久保存） =====================
+# ===================== 自定义警戒值设置函数 =====================
 def render_alert_config_panel():
     st.subheader("⚙️ 自定义警戒值设置")
     st.info("修改后点击【保存设置】生效，所有分析页面将使用新的警戒值判断")
@@ -575,9 +578,179 @@ def plot_sales_unit_metrics_chart(df: pd.DataFrame, title: str, selected_items=N
     fig.update_layout(title=title, barmode='group', height=600)
     return fig
 
+# ===================== 新增：导出功能 =====================
+def export_analysis_to_excel(metrics: Dict, df: pd.DataFrame, period_name: str, charts_dict: Dict = None):
+    """
+    导出分析数据到Excel，包含数据表和图表
+    """
+    output = BytesIO()
+    
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # 1. 核心指标表
+        core_metrics = {
+            "指标": [
+                "店铺数量", "交易收入", "订单毛利", "订单毛利率(%)", 
+                "运营毛利", "运营毛利率(%)", "商品成本", "商品成本占比(%)",
+                "耗材成本", "耗材成本占比(%)", "人工成本", "人工成本占比(%)",
+                "头程运费", "头程运费占比(%)", "退回运费", "退回运费占比(%)",
+                "罚款金额", "罚款金额占比(%)", "售后净额", "售后净额占比(%)"
+            ],
+            "数值": [
+                metrics["店铺数量"],
+                metrics["交易收入"],
+                metrics["订单毛利"],
+                metrics["订单毛利率"],
+                metrics["运营毛利"],
+                metrics["运营毛利率"],
+                metrics["商品成本"],
+                metrics["商品成本占比"],
+                metrics["耗材成本"],
+                metrics["耗材成本占比"],
+                metrics["人工成本"],
+                metrics["人工成本占比"],
+                metrics["头程运费"],
+                metrics["头程运费占比"],
+                metrics["退回运费"],
+                metrics["退回运费占比"],
+                metrics["罚款金额"],
+                metrics["罚款金额占比"],
+                metrics["售后净额"],
+                metrics["售后净额占比"]
+            ]
+        }
+        
+        if metrics["has_sales_quantity"]:
+            core_metrics["指标"].extend([
+                "销售数量总计", "客单价(元/单)", "均单利润(元/单)",
+                "单均订单毛利(元/单)", "单均商品成本(元/单)"
+            ])
+            core_metrics["数值"].extend([
+                metrics["销售数量总计"],
+                metrics["客单价(元/单)"],
+                metrics["均单利润(元/单)"],
+                metrics["单均订单毛利(元/单)"],
+                metrics["单均商品成本(元/单)"]
+            ])
+        
+        pd.DataFrame(core_metrics).to_excel(writer, sheet_name=f"{period_name}核心指标", index=False)
+        
+        # 2. 原始数据表
+        df.to_excel(writer, sheet_name=f"{period_name}原始数据", index=False)
+        
+        # 3. 店铺数据表
+        if metrics["店铺数据"]:
+            shop_df = pd.DataFrame(metrics["店铺数据"]).T
+            shop_df.to_excel(writer, sheet_name=f"{period_name}店铺数据")
+        
+        # 4. 销售员数据表
+        if metrics["sales_data"]:
+            sales_df = pd.DataFrame(metrics["sales_data"]).T
+            sales_df.to_excel(writer, sheet_name=f"{period_name}销售员数据")
+    
+    output.seek(0)
+    return output.getvalue()
+
+def render_export_button(metrics: Dict, df: pd.DataFrame, period_name: str):
+    """渲染导出按钮"""
+    col1, col2, col3 = st.columns([1, 1, 4])
+    with col1:
+        if st.button("📥 导出Excel数据", key=f"export_{period_name}", use_container_width=True):
+            with st.spinner("正在生成Excel文件..."):
+                excel_data = export_analysis_to_excel(metrics, df, period_name)
+                
+                # 提供下载
+                st.download_button(
+                    label="📥 点击下载Excel文件",
+                    data=excel_data,
+                    file_name=f"Temu数据分析_{period_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"download_{period_name}"
+                )
+
+def render_double_export_button(curr_metrics: Dict, last_metrics: Dict, curr_df: pd.DataFrame, last_df: pd.DataFrame):
+    """双月对比导出按钮"""
+    col1, col2, col3 = st.columns([1, 1, 4])
+    with col1:
+        if st.button("📥 导出双月对比数据", key="export_double", use_container_width=True):
+            with st.spinner("正在生成Excel文件..."):
+                output = BytesIO()
+                
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    # 本月核心指标
+                    curr_core = {
+                        "指标": ["店铺数量", "交易收入", "订单毛利", "订单毛利率(%)", "运营毛利", "运营毛利率(%)"],
+                        "数值": [curr_metrics["店铺数量"], curr_metrics["交易收入"], curr_metrics["订单毛利"], 
+                                curr_metrics["订单毛利率"], curr_metrics["运营毛利"], curr_metrics["运营毛利率"]]
+                    }
+                    pd.DataFrame(curr_core).to_excel(writer, sheet_name="本月核心指标", index=False)
+                    
+                    # 上月核心指标
+                    last_core = {
+                        "指标": ["店铺数量", "交易收入", "订单毛利", "订单毛利率(%)", "运营毛利", "运营毛利率(%)"],
+                        "数值": [last_metrics["店铺数量"], last_metrics["交易收入"], last_metrics["订单毛利"], 
+                                last_metrics["订单毛利率"], last_metrics["运营毛利"], last_metrics["运营毛利率"]]
+                    }
+                    pd.DataFrame(last_core).to_excel(writer, sheet_name="上月核心指标", index=False)
+                    
+                    # 对比数据
+                    compare_data = {
+                        "指标": ["交易收入", "订单毛利", "运营毛利", "销售数量", "客单价", "均单利润"],
+                        "本月": [
+                            curr_metrics["交易收入"], 
+                            curr_metrics["订单毛利"], 
+                            curr_metrics["运营毛利"],
+                            curr_metrics["销售数量总计"] if curr_metrics["has_sales_quantity"] else 0,
+                            curr_metrics["客单价(元/单)"] if curr_metrics["has_sales_quantity"] else 0,
+                            curr_metrics["均单利润(元/单)"] if curr_metrics["has_sales_quantity"] else 0
+                        ],
+                        "上月": [
+                            last_metrics["交易收入"],
+                            last_metrics["订单毛利"],
+                            last_metrics["运营毛利"],
+                            last_metrics["销售数量总计"] if last_metrics["has_sales_quantity"] else 0,
+                            last_metrics["客单价(元/单)"] if last_metrics["has_sales_quantity"] else 0,
+                            last_metrics["均单利润(元/单)"] if last_metrics["has_sales_quantity"] else 0
+                        ],
+                        "差异": [
+                            curr_metrics["交易收入"] - last_metrics["交易收入"],
+                            curr_metrics["订单毛利"] - last_metrics["订单毛利"],
+                            curr_metrics["运营毛利"] - last_metrics["运营毛利"],
+                            (curr_metrics["销售数量总计"] - last_metrics["销售数量总计"]) if curr_metrics["has_sales_quantity"] and last_metrics["has_sales_quantity"] else 0,
+                            (curr_metrics["客单价(元/单)"] - last_metrics["客单价(元/单)"]) if curr_metrics["has_sales_quantity"] and last_metrics["has_sales_quantity"] else 0,
+                            (curr_metrics["均单利润(元/单)"] - last_metrics["均单利润(元/单)"]) if curr_metrics["has_sales_quantity"] and last_metrics["has_sales_quantity"] else 0
+                        ],
+                        "差异%": [
+                            round((curr_metrics["交易收入"] - last_metrics["交易收入"]) / last_metrics["交易收入"] * 100, 2) if last_metrics["交易收入"] > 0 else 0,
+                            round((curr_metrics["订单毛利"] - last_metrics["订单毛利"]) / last_metrics["订单毛利"] * 100, 2) if last_metrics["订单毛利"] > 0 else 0,
+                            round((curr_metrics["运营毛利"] - last_metrics["运营毛利"]) / last_metrics["运营毛利"] * 100, 2) if last_metrics["运营毛利"] > 0 else 0,
+                            round((curr_metrics["销售数量总计"] - last_metrics["销售数量总计"]) / last_metrics["销售数量总计"] * 100, 2) if last_metrics["销售数量总计"] > 0 else 0,
+                            round((curr_metrics["客单价(元/单)"] - last_metrics["客单价(元/单)"]) / last_metrics["客单价(元/单)"] * 100, 2) if last_metrics["客单价(元/单)"] > 0 else 0,
+                            round((curr_metrics["均单利润(元/单)"] - last_metrics["均单利润(元/单)"]) / last_metrics["均单利润(元/单)"] * 100, 2) if last_metrics["均单利润(元/单)"] > 0 else 0
+                        ]
+                    }
+                    pd.DataFrame(compare_data).to_excel(writer, sheet_name="双月对比", index=False)
+                    
+                    # 原始数据
+                    curr_df.to_excel(writer, sheet_name="本月原始数据", index=False)
+                    last_df.to_excel(writer, sheet_name="上月原始数据", index=False)
+                
+                output.seek(0)
+                
+                st.download_button(
+                    label="📥 点击下载Excel文件",
+                    data=output.getvalue(),
+                    file_name=f"Temu双月对比_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="download_double"
+                )
+
 # ===================== 页面渲染函数 =====================
 def render_monthly_analysis(metrics: Dict, df: pd.DataFrame):
     st.subheader(f"📈 {metrics['周期']} 核心数据")
+    
+    # 添加导出按钮
+    render_export_button(metrics, df, metrics['周期'])
+    
     c1,c2,c3 = st.columns(3)
     c4,c5,c6 = st.columns(3)
 
@@ -720,6 +893,10 @@ def render_monthly_analysis(metrics: Dict, df: pd.DataFrame):
 
 def render_double_month_analysis(curr: Dict, last: Dict):
     st.subheader("🔍 双月详细对比分析")
+    
+    # 添加导出按钮
+    render_double_export_button(curr, last, st.session_state.df_current, st.session_state.df_last)
+    
     base_metrics = [
         "店铺数量", "交易收入", "订单毛利", "订单毛利率", "运营毛利", "运营毛利率",
         "商品成本", "商品成本占比", "人工成本", "人工成本占比", 
@@ -975,7 +1152,7 @@ def main():
         if not check_password():
             st.stop()  # 密码错误或未登录时停止执行后续代码
         
-        # 密码验证通过后显示菜单（已删除规则页面）
+        # 密码验证通过后显示菜单
         menu_option = st.radio(
             "选择页面",
             [
@@ -1014,6 +1191,10 @@ def main():
 
     df_current = read_data(uploaded_file1)
     df_last = read_data(uploaded_file2)
+
+    # 保存到session_state供导出使用
+    st.session_state.df_current = df_current
+    st.session_state.df_last = df_last
 
     if menu_option == "📊 单月数据分析":
         st.title("📊 单月店铺数据分析")
