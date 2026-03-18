@@ -964,43 +964,6 @@ def render_sales_double_month_analysis(metrics_current: Dict, metrics_last: Dict
         return pd.DataFrame()
     return pd.DataFrame()
 
-def get_temu_latest_rules() -> Dict:
-    return {
-        "update_time": datetime.now().strftime("%Y年%m月%d日 %H:%M:%S"),
-        "core_policy": {
-            "title": "核心政策调整",
-            "content": [
-                "✅ 回款周期：2026年起结算回款上限调整为90天，异议期延长至5天，需提前规划现金流",
-                "✅ 铺货管控：按动销层级限制每日上新数量，零动销店铺日建品≤100个",
-                "✅ 比价机制：弱化纯价格竞争，新增品质分（≥80分）、合规资质权重",
-                "✅ 滞销清理：在售180天零销量商品强制下架，违规店铺缩减建品权限"
-            ]
-        },
-        "compliance": {
-            "title": "合规认证要求",
-            "content": [
-                "🔍 资质核验：2026年4月20日起全面核验CPSC/FDA/CE等合规资质，造假罚1-10万保证金",
-                "🔍 清关调整：美国市场废弃T86直邮，全面切换B2B2C清关模式（3%-5%关税）",
-                "🔍 类目准入：食品/电子/玩具类强制类目认证，审核周期压缩至72小时"
-            ]
-        },
-        "logistics": {
-            "title": "物流与履约优化",
-            "content": [
-                "🚚 海外仓目标：2026年欧美本地仓发货占比≥80%，优先备货海外仓享流量倾斜",
-                "🚚 欧洲布局：与奥地利邮政合作PUDO取送服务，覆盖中东欧多国",
-                "🚚 成本优化：新增8大智能仓储中心，履约成本降低5%-8%"
-            ]
-        },
-        "cost": {
-            "title": "费用与佣金规则",
-            "content": [
-                "💰 类目佣金：服饰类12.5%、电子产品16-18%，叠加物流/支付手续费",
-                "💰 绩效扣费：库存准确率/订单缺陷率纳入KPI，不合格将限制流量与回款权限"
-            ]
-        }
-    }
-
 # ===================== 主入口 =====================
 def main():
     # 侧边栏
@@ -1012,19 +975,17 @@ def main():
         if not check_password():
             st.stop()  # 密码错误或未登录时停止执行后续代码
         
-        # 密码验证通过后显示菜单
+        # 密码验证通过后显示菜单（已删除规则页面）
         menu_option = st.radio(
             "选择页面",
             [
                 "📊 单月数据分析",
                 "📈 双月对比分析",
                 "⚙️ 警戒值设置",
-                "📥 下载数据模板",
-                "📜 Temu最新规则解读"
+                "📥 下载数据模板"
             ]
         )
 
-    # 不再需要密码修改功能
     if menu_option == "📥 下载数据模板":
         st.subheader("📥 数据模板下载")
         st.download_button(
@@ -1034,18 +995,6 @@ def main():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         st.info("💡 按模板填写后上传即可自动分析")
-        return
-
-    if menu_option == "📜 Temu最新规则解读":
-        st.subheader("📜 Temu 最新平台规则与政策解读")
-        rules = get_temu_latest_rules()
-        st.success(f"规则更新时间：{rules['update_time']}")
-        for k, v in rules.items():
-            if k == "update_time":
-                continue
-            with st.expander(v["title"], expanded=False):
-                for line in v["content"]:
-                    st.write(line)
         return
 
     # 警戒值设置页面
