@@ -6,6 +6,8 @@ import numpy as np
 from datetime import datetime
 from typing import Dict, Optional
 from io import BytesIO
+import json
+import os
 
 # ===================== 全局配置与常量定义 =====================
 st.set_page_config(page_title="Temu店铺数据分析工具", layout="wide")
@@ -30,22 +32,47 @@ if 'metrics_current' not in st.session_state:
 if 'metrics_last' not in st.session_state:
     st.session_state.metrics_last = None    # 上月计算指标
 
-# 自定义警戒值session
-if 'alert_config' not in st.session_state:
-    st.session_state.alert_config = {
-        "ORDER_MARGIN_RATE_THRESHOLD": 20.0,    # 订单毛利率警戒值
-        "OPERATE_MARGIN_RATE_THRESHOLD": 15.0,  # 运营毛利率警戒值
-        "SALES_QUANTITY_THRESHOLD": 100,        # 销售数量警戒值
-        "UNIT_PRICE_THRESHOLD": 50.0,           # 客单价警戒值
-        "UNIT_PROFIT_THRESHOLD": 10.0           # 均单利润警戒值
-    }
-
 CONFIG = {
     "SUPPORTED_FILE_TYPES": ["xlsx", "csv"],
     "ENCODING": "utf-8",
     "DECIMAL_PLACES": 2,
     "FIXED_PASSWORD": "123456"  # 固定密码，不可修改
 }
+
+# ===================== 配置文件持久化 =====================
+CONFIG_FILE = "alert_config.json"
+
+def load_alert_config():
+    """从文件加载警戒值配置"""
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return {
+                "ORDER_MARGIN_RATE_THRESHOLD": 20.0,
+                "OPERATE_MARGIN_RATE_THRESHOLD": 15.0,
+                "SALES_QUANTITY_THRESHOLD": 100,
+                "UNIT_PRICE_THRESHOLD": 50.0,
+                "UNIT_PROFIT_THRESHOLD": 10.0
+            }
+    else:
+        return {
+            "ORDER_MARGIN_RATE_THRESHOLD": 20.0,
+            "OPERATE_MARGIN_RATE_THRESHOLD": 15.0,
+            "SALES_QUANTITY_THRESHOLD": 100,
+            "UNIT_PRICE_THRESHOLD": 50.0,
+            "UNIT_PROFIT_THRESHOLD": 10.0
+        }
+
+def save_alert_config(config):
+    """保存警戒值配置到文件"""
+    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
+
+# 自定义警戒值session（从文件加载）
+if 'alert_config' not in st.session_state:
+    st.session_state.alert_config = load_alert_config()
 
 # ===================== 密码验证函数 =====================
 def check_password():
@@ -74,7 +101,7 @@ def check_password():
     
     return False
 
-# ===================== 自定义警戒值设置函数 =====================
+# ===================== 自定义警戒值设置函数（已添加永久保存） =====================
 def render_alert_config_panel():
     st.subheader("⚙️ 自定义警戒值设置")
     st.info("修改后点击【保存设置】生效，所有分析页面将使用新的警戒值判断")
@@ -116,14 +143,17 @@ def render_alert_config_panel():
         )
     
     if st.button("💾 保存警戒值设置", key="save_alert_config"):
-        st.session_state.alert_config.update({
+        new_config = {
             "ORDER_MARGIN_RATE_THRESHOLD": order_margin,
             "OPERATE_MARGIN_RATE_THRESHOLD": operate_margin,
             "SALES_QUANTITY_THRESHOLD": sales_quantity,
             "UNIT_PRICE_THRESHOLD": unit_price,
             "UNIT_PROFIT_THRESHOLD": unit_profit
-        })
+        }
+        st.session_state.alert_config.update(new_config)
+        save_alert_config(new_config)  # 保存到文件
         st.success("✅ 警戒值设置保存成功！")
+        st.rerun()
     
     # 显示当前生效的警戒值
     st.markdown("### 📌 当前生效的警戒值")
