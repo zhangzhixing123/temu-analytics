@@ -82,7 +82,7 @@ def check_password():
     """简单的密码验证，密码固定为123456"""
     st.sidebar.markdown("---")
     st.sidebar.subheader("🔐 登录")
-    
+
     # 如果已经登录，直接返回True
     if st.session_state.authenticated:
         st.sidebar.success("✅ 已登录")
@@ -90,10 +90,10 @@ def check_password():
             st.session_state.authenticated = False
             st.rerun()
         return True
-    
+
     # 未登录则显示密码输入框
     pwd = st.sidebar.text_input("请输入访问密码", type="password", key="login_pwd")
-    
+
     if st.sidebar.button("登录"):
         if pwd == CONFIG["FIXED_PASSWORD"]:
             st.session_state.authenticated = True
@@ -101,14 +101,14 @@ def check_password():
             st.rerun()
         else:
             st.sidebar.error("❌ 密码错误！")
-    
+
     return False
 
 # ===================== 自定义警戒值设置函数 =====================
 def render_alert_config_panel():
     st.subheader("⚙️ 自定义警戒值设置")
     st.info("修改后点击【保存设置】生效，所有分析页面将使用新的警戒值判断")
-    
+
     col1, col2 = st.columns(2)
     with col1:
         # 毛利率相关
@@ -144,7 +144,7 @@ def render_alert_config_panel():
             value=st.session_state.alert_config["UNIT_PRICE_THRESHOLD"],
             key="unit_price_threshold"
         )
-    
+
     if st.button("💾 保存警戒值设置", key="save_alert_config"):
         new_config = {
             "ORDER_MARGIN_RATE_THRESHOLD": order_margin,
@@ -157,7 +157,7 @@ def render_alert_config_panel():
         save_alert_config(new_config)  # 保存到文件
         st.success("✅ 警戒值设置保存成功！")
         st.rerun()
-    
+
     # 显示当前生效的警戒值
     st.markdown("### 📌 当前生效的警戒值")
     alert_df = pd.DataFrame({
@@ -205,49 +205,61 @@ def highlight_below_threshold(val, threshold):
     try:
         if pd.isna(val) or val == 0:
             return ''
-        val_num = float(val)
+        # 确保能转换为数字
+        if isinstance(val, (int, float)):
+            val_num = float(val)
+        else:
+            # 尝试提取数字
+            import re
+            match = re.search(r'[\d\.]+', str(val))
+            if match:
+                val_num = float(match.group())
+            else:
+                return ''
+        
         if val_num < threshold:
             return 'background-color: #ffcccc; color: red; font-weight: bold'
     except:
         pass
     return ''
 
+# 🔴 修复后的 highlight_threshold_values 函数（使用 apply 代替 applymap）
 def highlight_threshold_values(df, alert_config):
     """为DataFrame应用阈值标红样式"""
     styled_df = df.style
     
     # 客单价标红
     if '客单价(元/单)' in df.columns:
-        styled_df = styled_df.applymap(
-            lambda x: highlight_below_threshold(x, alert_config["UNIT_PRICE_THRESHOLD"]),
+        styled_df = styled_df.apply(
+            lambda x: [highlight_below_threshold(val, alert_config["UNIT_PRICE_THRESHOLD"]) for val in x],
             subset=['客单价(元/单)']
         )
     
     # 均单利润标红
     if '均单利润(元/单)' in df.columns:
-        styled_df = styled_df.applymap(
-            lambda x: highlight_below_threshold(x, alert_config["UNIT_PROFIT_THRESHOLD"]),
+        styled_df = styled_df.apply(
+            lambda x: [highlight_below_threshold(val, alert_config["UNIT_PROFIT_THRESHOLD"]) for val in x],
             subset=['均单利润(元/单)']
         )
     
     # 销售数量标红
     if '销售数量' in df.columns:
-        styled_df = styled_df.applymap(
-            lambda x: highlight_below_threshold(x, alert_config["SALES_QUANTITY_THRESHOLD"]),
+        styled_df = styled_df.apply(
+            lambda x: [highlight_below_threshold(val, alert_config["SALES_QUANTITY_THRESHOLD"]) for val in x],
             subset=['销售数量']
         )
     
     # 订单毛利率标红
     if '订单毛利率(%)' in df.columns:
-        styled_df = styled_df.applymap(
-            lambda x: highlight_below_threshold(x, alert_config["ORDER_MARGIN_RATE_THRESHOLD"]),
+        styled_df = styled_df.apply(
+            lambda x: [highlight_below_threshold(val, alert_config["ORDER_MARGIN_RATE_THRESHOLD"]) for val in x],
             subset=['订单毛利率(%)']
         )
     
     # 运营毛利率标红
     if '运营毛利率(%)' in df.columns:
-        styled_df = styled_df.applymap(
-            lambda x: highlight_below_threshold(x, alert_config["OPERATE_MARGIN_RATE_THRESHOLD"]),
+        styled_df = styled_df.apply(
+            lambda x: [highlight_below_threshold(val, alert_config["OPERATE_MARGIN_RATE_THRESHOLD"]) for val in x],
             subset=['运营毛利率(%)']
         )
     
@@ -258,27 +270,27 @@ def calculate_sales_per_unit(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     if '销售数量' not in df.columns:
         return df
-    
+
     # 处理销售数量为0或空的情况，避免除零错误
     df['销售数量'] = df['销售数量'].replace(0, np.nan)
     sales_quantity = df['销售数量']
-    
+
     # 单均订单毛利和单均商品成本
     df['单均订单毛利(元/单)'] = np.where(sales_quantity.notna(),
                                       round(df['订单毛利'] / sales_quantity, CONFIG["DECIMAL_PLACES"]), 0.0)
     df['单均商品成本(元/单)'] = np.where(sales_quantity.notna(),
                                      round(df['商品成本'] / sales_quantity, CONFIG["DECIMAL_PLACES"]), 0.0)
-    
+
     # 客单价、均单利润
     df['客单价(元/单)'] = np.where(sales_quantity.notna(),
                                 round(df['交易收入'] / sales_quantity, CONFIG["DECIMAL_PLACES"]), 0.0)
     df['均单利润(元/单)'] = np.where(sales_quantity.notna() & df['运营毛利'].notna(),
                                    round(df['运营毛利'] / sales_quantity, CONFIG["DECIMAL_PLACES"]), 0.0)
-    
+
     # 毛利率、运营毛利率（补充到明细行）
     df['订单毛利率(%)'] = calculate_margin_ratio(df['订单毛利'], df['交易收入'])
     df['运营毛利率(%)'] = calculate_margin_ratio(df['运营毛利'], df['交易收入'])
-    
+
     # 恢复销售数量为0（避免显示NaN）
     df['销售数量'] = df['销售数量'].fillna(0).astype(int)
     return df
@@ -546,7 +558,7 @@ def plot_unit_metrics_chart(df: pd.DataFrame, title: str, selected_items=None):
         df = df.loc[selected_items]
     unit_price_threshold = st.session_state.alert_config["UNIT_PRICE_THRESHOLD"]
     unit_profit_threshold = st.session_state.alert_config["UNIT_PROFIT_THRESHOLD"]
-    
+
     fig = go.Figure()
     # 客单价
     fig.add_trace(go.Bar(x=df.index, y=df['客单价(元/单)'], name=f'客单价 (警戒值:{unit_price_threshold}元)', 
@@ -769,7 +781,7 @@ def render_monthly_analysis(metrics: Dict, df: pd.DataFrame):
         op_rate = metrics["运营毛利率"]
         order_threshold = st.session_state.alert_config["ORDER_MARGIN_RATE_THRESHOLD"]
         operate_threshold = st.session_state.alert_config["OPERATE_MARGIN_RATE_THRESHOLD"]
-        
+
         st.metric("订单毛利率", f"{o_rate:.2f}%", 
                   delta=f"＜{order_threshold}% 警示" if o_rate<order_threshold else f"≥{order_threshold}% 合格", 
                   delta_color="inverse" if o_rate<order_threshold else "normal")
@@ -792,7 +804,7 @@ def render_monthly_analysis(metrics: Dict, df: pd.DataFrame):
         if metrics["has_sales_quantity"]:
             unit_price_threshold = st.session_state.alert_config["UNIT_PRICE_THRESHOLD"]
             unit_profit_threshold = st.session_state.alert_config["UNIT_PROFIT_THRESHOLD"]
-            
+
             st.metric("客单价", f"{metrics['客单价(元/单)']:.2f} 元/单",
                       delta=f"＜{unit_price_threshold} 元 偏低" if metrics['客单价(元/单)']<unit_price_threshold else f"≥{unit_price_threshold} 元 正常",
                       delta_color="inverse" if metrics['客单价(元/单)']<unit_price_threshold else "normal")
@@ -820,7 +832,7 @@ def render_monthly_analysis(metrics: Dict, df: pd.DataFrame):
         if shops:
             styled_shop_df = highlight_threshold_values(shop_df.loc[shops], st.session_state.alert_config)
             st.dataframe(styled_shop_df, use_container_width=True)
-            
+
             st.plotly_chart(plot_margin_chart(shop_df, '订单毛利率(%)', '店铺订单毛利率', 'ORDER_MARGIN_RATE_THRESHOLD', shops), use_container_width=True)
             st.plotly_chart(plot_cost_ratio_chart(shop_df, '店铺成本占比', shops), use_container_width=True)
             if metrics["has_sales_quantity"]:
@@ -838,7 +850,7 @@ def render_monthly_analysis(metrics: Dict, df: pd.DataFrame):
         if sales:
             styled_sales_df = highlight_threshold_values(sales_df.loc[sales], st.session_state.alert_config)
             st.dataframe(styled_sales_df, use_container_width=True)
-            
+
             st.plotly_chart(plot_cost_ratio_chart(sales_df, '销售员成本占比', sales), use_container_width=True)
             if metrics["has_sales_quantity"]:
                 st.plotly_chart(plot_sales_quantity_chart(sales_df, '销售员销量排名', sales), use_container_width=True)
@@ -853,39 +865,39 @@ def render_monthly_analysis(metrics: Dict, df: pd.DataFrame):
                 sales_threshold = st.session_state.alert_config["SALES_QUANTITY_THRESHOLD"]
                 unit_price_threshold = st.session_state.alert_config["UNIT_PRICE_THRESHOLD"]
                 unit_profit_threshold = st.session_state.alert_config["UNIT_PROFIT_THRESHOLD"]
-                
+
                 o_rate = row.get('订单毛利率(%)',0)
                 op_rate = row.get('运营毛利率(%)',0)
                 fine = row.get('罚款占收入比(%)',0)
-                
+
                 if o_rate < order_threshold: 
                     st.warning(f"订单毛利率{o_rate:.2f}% 不达标（标准{order_threshold}%）")
                 else: 
                     st.success(f"订单毛利率{o_rate:.2f}% 达标（标准{order_threshold}%）")
-                
+
                 if op_rate < operate_threshold: 
                     st.warning(f"运营毛利率{op_rate:.2f}% 不达标（标准{operate_threshold}%）")
                 else: 
                     st.success(f"运营毛利率{op_rate:.2f}% 达标（标准{operate_threshold}%）")
-                
+
                 if fine>0: 
                     st.info(f"罚款占收入比{fine:.2f}%，需减少违规订单")
-                
+
                 if metrics["has_sales_quantity"]:
                     qty = row.get('销售数量',0)
                     unit_price = row.get('客单价(元/单)',0)
                     unit_profit = row.get('均单利润(元/单)',0)
-                    
+
                     if qty < sales_threshold: 
                         st.warning(f"销量{qty} 偏低（建议≥{sales_threshold}单）")
                     else: 
                         st.success(f"销量{qty} 正常（≥{sales_threshold}单）")
-                    
+
                     if unit_price < unit_price_threshold: 
                         st.warning(f"客单价{unit_price:.2f}元 偏低（建议≥{unit_price_threshold}元）")
                     else: 
                         st.success(f"客单价{unit_price:.2f}元 正常（≥{unit_price_threshold}元）")
-                    
+
                     if unit_profit < unit_profit_threshold: 
                         st.warning(f"均单利润{unit_profit:.2f}元 偏低（建议≥{unit_profit_threshold}元）")
                     else: 
@@ -1016,7 +1028,7 @@ def render_double_month_analysis(curr: Dict, last: Dict):
             st.error(f"❌ 销售数量环比下降 {abs(qty_diff):,} 单（{abs(qty_rate):.2f}%）")
         else:
             st.info(f"➡️ 销售数量环比无变化")
-        
+
         unit_price_diff = curr["客单价(元/单)"] - last["客单价(元/单)"]
         unit_price_rate = calculate_margin_ratio(unit_price_diff, last["客单价(元/单)"])
         if unit_price_diff > 0:
@@ -1025,7 +1037,7 @@ def render_double_month_analysis(curr: Dict, last: Dict):
             st.error(f"❌ 客单价环比下降 {abs(unit_price_diff):.2f} 元（{abs(unit_price_rate):.2f}%）")
         else:
             st.info(f"➡️ 客单价环比无变化")
-        
+
         unit_profit_diff = curr["均单利润(元/单)"] - last["均单利润(元/单)"]
         unit_profit_rate = calculate_margin_ratio(unit_profit_diff, last["均单利润(元/单)"])
         if unit_profit_diff > 0:
@@ -1055,7 +1067,7 @@ def render_shop_margin_ranking(metrics_current: Dict, metrics_last: Dict) -> Opt
     rank_df["订单毛利率_本月(%)"] = shop_curr["订单毛利率(%)"].round(CONFIG["DECIMAL_PLACES"])
     rank_df["运营毛利率_上月(%)"] = shop_last["运营毛利率(%)"].round(CONFIG["DECIMAL_PLACES"])
     rank_df["运营毛利率_本月(%)"] = shop_curr["运营毛利率(%)"].round(CONFIG["DECIMAL_PLACES"])
-    
+
     if metrics_current["has_sales_quantity"] and metrics_last["has_sales_quantity"]:
         rank_df["商品成本占比_上月(%)"] = shop_last["商品成本占比(%)"].round(CONFIG["DECIMAL_PLACES"])
         rank_df["商品成本占比_本月(%)"] = shop_curr["商品成本占比(%)"].round(CONFIG["DECIMAL_PLACES"])
@@ -1071,7 +1083,7 @@ def render_shop_margin_ranking(metrics_current: Dict, metrics_last: Dict) -> Opt
         rank_df["均单利润_本月(元/单)"] = shop_curr["均单利润(元/单)"].round(CONFIG["DECIMAL_PLACES"])
     rank_df = rank_df.sort_values("运营毛利_差异(元)", ascending=False)
     rank_df.insert(0, "排名", range(1, len(rank_df)+1))
-    
+
     # 应用阈值标红样式
     styled_rank_df = highlight_threshold_values(rank_df, st.session_state.alert_config)
     st.dataframe(
@@ -1103,7 +1115,7 @@ def render_sales_margin_ranking(metrics_current: Dict, metrics_last: Dict) -> Op
     rank_df["订单毛利率_本月(%)"] = sales_curr["订单毛利率(%)"].round(CONFIG["DECIMAL_PLACES"])
     rank_df["运营毛利率_上月(%)"] = sales_last["运营毛利率(%)"].round(CONFIG["DECIMAL_PLACES"])
     rank_df["运营毛利率_本月(%)"] = sales_curr["运营毛利率(%)"].round(CONFIG["DECIMAL_PLACES"])
-    
+
     if metrics_current["has_sales_quantity"] and metrics_last["has_sales_quantity"]:
         rank_df["商品成本占比_上月(%)"] = sales_last["商品成本占比(%)"].round(CONFIG["DECIMAL_PLACES"])
         rank_df["商品成本占比_本月(%)"] = sales_curr["商品成本占比(%)"].round(CONFIG["DECIMAL_PLACES"])
@@ -1119,7 +1131,7 @@ def render_sales_margin_ranking(metrics_current: Dict, metrics_last: Dict) -> Op
         rank_df["均单利润_本月(元/单)"] = sales_curr["均单利润(元/单)"].round(CONFIG["DECIMAL_PLACES"])
     rank_df = rank_df.sort_values("运营毛利_差异(元)", ascending=False)
     rank_df.insert(0, "排名", range(1, len(rank_df)+1))
-    
+
     # 应用阈值标红样式
     styled_rank_df = highlight_threshold_values(rank_df, st.session_state.alert_config)
     st.dataframe(
@@ -1147,11 +1159,11 @@ def main():
     with st.sidebar:
         st.image("https://img.icons8.com/fluency/96/000000/bar-chart.png", width=100)
         st.title("📌 功能菜单")
-        
+
         # 先进行密码验证
         if not check_password():
             st.stop()  # 密码错误或未登录时停止执行后续代码
-        
+
         # 密码验证通过后显示菜单
         menu_option = st.radio(
             "选择页面",
