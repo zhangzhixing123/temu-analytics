@@ -23,30 +23,29 @@ if 'authenticated' not in st.session_state:
 
 # 文件上传状态持久化
 if 'uploaded_file1' not in st.session_state:
-    st.session_state.uploaded_file1 = None  # 本月文件
+    st.session_state.uploaded_file1 = None
 if 'uploaded_file2' not in st.session_state:
-    st.session_state.uploaded_file2 = None  # 上月文件
+    st.session_state.uploaded_file2 = None
 if 'df_current' not in st.session_state:
-    st.session_state.df_current = None     # 本月解析后的数据
+    st.session_state.df_current = None
 if 'df_last' not in st.session_state:
-    st.session_state.df_last = None        # 上月解析后的数据
+    st.session_state.df_last = None
 if 'metrics_current' not in st.session_state:
-    st.session_state.metrics_current = None # 本月计算指标
+    st.session_state.metrics_current = None
 if 'metrics_last' not in st.session_state:
-    st.session_state.metrics_last = None    # 上月计算指标
+    st.session_state.metrics_last = None
 
 CONFIG = {
     "SUPPORTED_FILE_TYPES": ["xlsx", "csv"],
     "ENCODING": "utf-8",
     "DECIMAL_PLACES": 2,
-    "FIXED_PASSWORD": "123456"  # 固定密码，不可修改
+    "FIXED_PASSWORD": "123456"
 }
 
 # ===================== 配置文件持久化 =====================
 CONFIG_FILE = "alert_config.json"
 
 def load_alert_config():
-    """从文件加载警戒值配置"""
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
@@ -69,31 +68,26 @@ def load_alert_config():
         }
 
 def save_alert_config(config):
-    """保存警戒值配置到文件"""
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
 
-# 自定义警戒值session（从文件加载）
 if 'alert_config' not in st.session_state:
     st.session_state.alert_config = load_alert_config()
 
 # ===================== 密码验证函数 =====================
 def check_password():
-    """简单的密码验证，密码固定为123456"""
     st.sidebar.markdown("---")
     st.sidebar.subheader("🔐 登录")
-
-    # 如果已经登录，直接返回True
+    
     if st.session_state.authenticated:
         st.sidebar.success("✅ 已登录")
         if st.sidebar.button("退出登录"):
             st.session_state.authenticated = False
             st.rerun()
         return True
-
-    # 未登录则显示密码输入框
+    
     pwd = st.sidebar.text_input("请输入访问密码", type="password", key="login_pwd")
-
+    
     if st.sidebar.button("登录"):
         if pwd == CONFIG["FIXED_PASSWORD"]:
             st.session_state.authenticated = True
@@ -101,17 +95,16 @@ def check_password():
             st.rerun()
         else:
             st.sidebar.error("❌ 密码错误！")
-
+    
     return False
 
 # ===================== 自定义警戒值设置函数 =====================
 def render_alert_config_panel():
     st.subheader("⚙️ 自定义警戒值设置")
     st.info("修改后点击【保存设置】生效，所有分析页面将使用新的警戒值判断")
-
+    
     col1, col2 = st.columns(2)
     with col1:
-        # 毛利率相关
         order_margin = st.number_input(
             "订单毛利率警戒值(%)",
             min_value=0.0, max_value=100.0, step=0.1,
@@ -131,7 +124,6 @@ def render_alert_config_panel():
             key="unit_profit_threshold"
         )
     with col2:
-        # 销量/客单价相关
         sales_quantity = st.number_input(
             "销售数量警戒值(单)",
             min_value=0, step=1,
@@ -144,7 +136,7 @@ def render_alert_config_panel():
             value=st.session_state.alert_config["UNIT_PRICE_THRESHOLD"],
             key="unit_price_threshold"
         )
-
+    
     if st.button("💾 保存警戒值设置", key="save_alert_config"):
         new_config = {
             "ORDER_MARGIN_RATE_THRESHOLD": order_margin,
@@ -154,11 +146,10 @@ def render_alert_config_panel():
             "UNIT_PROFIT_THRESHOLD": unit_profit
         }
         st.session_state.alert_config.update(new_config)
-        save_alert_config(new_config)  # 保存到文件
+        save_alert_config(new_config)
         st.success("✅ 警戒值设置保存成功！")
         st.rerun()
-
-    # 显示当前生效的警戒值
+    
     st.markdown("### 📌 当前生效的警戒值")
     alert_df = pd.DataFrame({
         "指标名称": [
@@ -199,17 +190,13 @@ def calculate_margin_ratio(numerator, denominator) -> float | pd.Series:
                         round((numerator / denominator * 100), CONFIG["DECIMAL_PLACES"]))
     return 0.0
 
-# 根据警戒值标红的样式函数
 def highlight_below_threshold(val, threshold):
-    """如果数值低于阈值，返回红色背景样式"""
     try:
         if pd.isna(val) or val == 0:
             return ''
-        # 确保能转换为数字
         if isinstance(val, (int, float)):
             val_num = float(val)
         else:
-            # 尝试提取数字
             import re
             match = re.search(r'[\d\.]+', str(val))
             if match:
@@ -223,40 +210,33 @@ def highlight_below_threshold(val, threshold):
         pass
     return ''
 
-# 🔴 修复后的 highlight_threshold_values 函数（使用 apply 代替 applymap）
 def highlight_threshold_values(df, alert_config):
-    """为DataFrame应用阈值标红样式"""
     styled_df = df.style
     
-    # 客单价标红
     if '客单价(元/单)' in df.columns:
         styled_df = styled_df.apply(
             lambda x: [highlight_below_threshold(val, alert_config["UNIT_PRICE_THRESHOLD"]) for val in x],
             subset=['客单价(元/单)']
         )
     
-    # 均单利润标红
     if '均单利润(元/单)' in df.columns:
         styled_df = styled_df.apply(
             lambda x: [highlight_below_threshold(val, alert_config["UNIT_PROFIT_THRESHOLD"]) for val in x],
             subset=['均单利润(元/单)']
         )
     
-    # 销售数量标红
     if '销售数量' in df.columns:
         styled_df = styled_df.apply(
             lambda x: [highlight_below_threshold(val, alert_config["SALES_QUANTITY_THRESHOLD"]) for val in x],
             subset=['销售数量']
         )
     
-    # 订单毛利率标红
     if '订单毛利率(%)' in df.columns:
         styled_df = styled_df.apply(
             lambda x: [highlight_below_threshold(val, alert_config["ORDER_MARGIN_RATE_THRESHOLD"]) for val in x],
             subset=['订单毛利率(%)']
         )
     
-    # 运营毛利率标红
     if '运营毛利率(%)' in df.columns:
         styled_df = styled_df.apply(
             lambda x: [highlight_below_threshold(val, alert_config["OPERATE_MARGIN_RATE_THRESHOLD"]) for val in x],
@@ -265,33 +245,27 @@ def highlight_threshold_values(df, alert_config):
     
     return styled_df
 
-# 计算单均指标
 def calculate_sales_per_unit(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     if '销售数量' not in df.columns:
         return df
-
-    # 处理销售数量为0或空的情况，避免除零错误
+    
     df['销售数量'] = df['销售数量'].replace(0, np.nan)
     sales_quantity = df['销售数量']
-
-    # 单均订单毛利和单均商品成本
+    
     df['单均订单毛利(元/单)'] = np.where(sales_quantity.notna(),
                                       round(df['订单毛利'] / sales_quantity, CONFIG["DECIMAL_PLACES"]), 0.0)
     df['单均商品成本(元/单)'] = np.where(sales_quantity.notna(),
                                      round(df['商品成本'] / sales_quantity, CONFIG["DECIMAL_PLACES"]), 0.0)
-
-    # 客单价、均单利润
+    
     df['客单价(元/单)'] = np.where(sales_quantity.notna(),
                                 round(df['交易收入'] / sales_quantity, CONFIG["DECIMAL_PLACES"]), 0.0)
     df['均单利润(元/单)'] = np.where(sales_quantity.notna() & df['运营毛利'].notna(),
                                    round(df['运营毛利'] / sales_quantity, CONFIG["DECIMAL_PLACES"]), 0.0)
-
-    # 毛利率、运营毛利率（补充到明细行）
+    
     df['订单毛利率(%)'] = calculate_margin_ratio(df['订单毛利'], df['交易收入'])
     df['运营毛利率(%)'] = calculate_margin_ratio(df['运营毛利'], df['交易收入'])
-
-    # 恢复销售数量为0（避免显示NaN）
+    
     df['销售数量'] = df['销售数量'].fillna(0).astype(int)
     return df
 
@@ -376,7 +350,6 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
     metrics["交易收入"] = round(df.get('交易收入', 0).sum(), CONFIG["DECIMAL_PLACES"])
     metrics["罚款金额"] = round(df.get('罚款金额', 0).sum(), CONFIG["DECIMAL_PLACES"])
     metrics["运营毛利"] = round(df.get('运营毛利', 0).sum(), CONFIG["DECIMAL_PLACES"])
-
     metrics["商品成本"] = round(df.get('商品成本', 0).sum(), CONFIG["DECIMAL_PLACES"])
     metrics["耗材成本"] = round(df.get('耗材成本', 0).sum(), CONFIG["DECIMAL_PLACES"])
     metrics["人工成本"] = round(df.get('人工成本', 0).sum(), CONFIG["DECIMAL_PLACES"])
@@ -454,7 +427,6 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
         shop_agg['店铺数量'] = shop_agg['店铺数量'].astype(int)
         if metrics["has_sales_quantity"]:
             shop_agg['销售数量'] = shop_agg['销售数量'].fillna(0).astype(int)
-        # 补充毛利率计算
         shop_agg['订单毛利率(%)'] = calculate_margin_ratio(shop_agg['订单毛利'], shop_agg['交易收入'])
         shop_agg['运营毛利率(%)'] = calculate_margin_ratio(shop_agg['运营毛利'], shop_agg['交易收入'])
         shop_agg['商品成本占比(%)'] = calculate_margin_ratio(shop_agg['商品成本'], shop_agg['交易收入'])
@@ -499,7 +471,6 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
         sales_agg['店铺数量'] = sales_agg['店铺数量'].astype(int)
         if metrics["has_sales_quantity"]:
             sales_agg['销售数量'] = sales_agg['销售数量'].fillna(0).astype(int)
-        # 补充毛利率计算
         sales_agg['订单毛利率(%)'] = calculate_margin_ratio(sales_agg['订单毛利'], sales_agg['交易收入'])
         sales_agg['运营毛利率(%)'] = calculate_margin_ratio(sales_agg['运营毛利'], sales_agg['交易收入'])
         sales_agg['罚款占收入比(%)'] = calculate_margin_ratio(sales_agg['罚款金额'], sales_agg['交易收入'])
@@ -558,13 +529,11 @@ def plot_unit_metrics_chart(df: pd.DataFrame, title: str, selected_items=None):
         df = df.loc[selected_items]
     unit_price_threshold = st.session_state.alert_config["UNIT_PRICE_THRESHOLD"]
     unit_profit_threshold = st.session_state.alert_config["UNIT_PROFIT_THRESHOLD"]
-
+    
     fig = go.Figure()
-    # 客单价
     fig.add_trace(go.Bar(x=df.index, y=df['客单价(元/单)'], name=f'客单价 (警戒值:{unit_price_threshold}元)', 
                          marker_color=['#d62728' if x < unit_price_threshold else '#2ca02c' for x in df['客单价(元/单)']],
                          text=df['客单价(元/单)'].apply(lambda x: f"¥{x:.2f}"), textposition='outside'))
-    # 均单利润
     fig.add_trace(go.Bar(x=df.index, y=df['均单利润(元/单)'], name=f'均单利润 (警戒值:{unit_profit_threshold}元)',
                          marker_color=['#FF8C00' if x < unit_profit_threshold else '#006400' for x in df['均单利润(元/单)']],
                          text=df['均单利润(元/单)'].apply(lambda x: f"¥{x:.2f}"), textposition='outside'))
@@ -590,15 +559,11 @@ def plot_sales_unit_metrics_chart(df: pd.DataFrame, title: str, selected_items=N
     fig.update_layout(title=title, barmode='group', height=600)
     return fig
 
-# ===================== 新增：导出功能 =====================
+# ===================== 导出功能 =====================
 def export_analysis_to_excel(metrics: Dict, df: pd.DataFrame, period_name: str, charts_dict: Dict = None):
-    """
-    导出分析数据到Excel，包含数据表和图表
-    """
     output = BytesIO()
     
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # 1. 核心指标表
         core_metrics = {
             "指标": [
                 "店铺数量", "交易收入", "订单毛利", "订单毛利率(%)", 
@@ -645,16 +610,12 @@ def export_analysis_to_excel(metrics: Dict, df: pd.DataFrame, period_name: str, 
             ])
         
         pd.DataFrame(core_metrics).to_excel(writer, sheet_name=f"{period_name}核心指标", index=False)
-        
-        # 2. 原始数据表
         df.to_excel(writer, sheet_name=f"{period_name}原始数据", index=False)
         
-        # 3. 店铺数据表
         if metrics["店铺数据"]:
             shop_df = pd.DataFrame(metrics["店铺数据"]).T
             shop_df.to_excel(writer, sheet_name=f"{period_name}店铺数据")
         
-        # 4. 销售员数据表
         if metrics["sales_data"]:
             sales_df = pd.DataFrame(metrics["sales_data"]).T
             sales_df.to_excel(writer, sheet_name=f"{period_name}销售员数据")
@@ -663,14 +624,11 @@ def export_analysis_to_excel(metrics: Dict, df: pd.DataFrame, period_name: str, 
     return output.getvalue()
 
 def render_export_button(metrics: Dict, df: pd.DataFrame, period_name: str):
-    """渲染导出按钮"""
     col1, col2, col3 = st.columns([1, 1, 4])
     with col1:
         if st.button("📥 导出Excel数据", key=f"export_{period_name}", use_container_width=True):
             with st.spinner("正在生成Excel文件..."):
                 excel_data = export_analysis_to_excel(metrics, df, period_name)
-                
-                # 提供下载
                 st.download_button(
                     label="📥 点击下载Excel文件",
                     data=excel_data,
@@ -680,7 +638,6 @@ def render_export_button(metrics: Dict, df: pd.DataFrame, period_name: str):
                 )
 
 def render_double_export_button(curr_metrics: Dict, last_metrics: Dict, curr_df: pd.DataFrame, last_df: pd.DataFrame):
-    """双月对比导出按钮"""
     col1, col2, col3 = st.columns([1, 1, 4])
     with col1:
         if st.button("📥 导出双月对比数据", key="export_double", use_container_width=True):
@@ -688,7 +645,6 @@ def render_double_export_button(curr_metrics: Dict, last_metrics: Dict, curr_df:
                 output = BytesIO()
                 
                 with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    # 本月核心指标
                     curr_core = {
                         "指标": ["店铺数量", "交易收入", "订单毛利", "订单毛利率(%)", "运营毛利", "运营毛利率(%)"],
                         "数值": [curr_metrics["店铺数量"], curr_metrics["交易收入"], curr_metrics["订单毛利"], 
@@ -696,7 +652,6 @@ def render_double_export_button(curr_metrics: Dict, last_metrics: Dict, curr_df:
                     }
                     pd.DataFrame(curr_core).to_excel(writer, sheet_name="本月核心指标", index=False)
                     
-                    # 上月核心指标
                     last_core = {
                         "指标": ["店铺数量", "交易收入", "订单毛利", "订单毛利率(%)", "运营毛利", "运营毛利率(%)"],
                         "数值": [last_metrics["店铺数量"], last_metrics["交易收入"], last_metrics["订单毛利"], 
@@ -704,7 +659,6 @@ def render_double_export_button(curr_metrics: Dict, last_metrics: Dict, curr_df:
                     }
                     pd.DataFrame(last_core).to_excel(writer, sheet_name="上月核心指标", index=False)
                     
-                    # 对比数据
                     compare_data = {
                         "指标": ["交易收入", "订单毛利", "运营毛利", "销售数量", "客单价", "均单利润"],
                         "本月": [
@@ -742,7 +696,6 @@ def render_double_export_button(curr_metrics: Dict, last_metrics: Dict, curr_df:
                     }
                     pd.DataFrame(compare_data).to_excel(writer, sheet_name="双月对比", index=False)
                     
-                    # 原始数据
                     curr_df.to_excel(writer, sheet_name="本月原始数据", index=False)
                     last_df.to_excel(writer, sheet_name="上月原始数据", index=False)
                 
@@ -760,7 +713,6 @@ def render_double_export_button(curr_metrics: Dict, last_metrics: Dict, curr_df:
 def render_monthly_analysis(metrics: Dict, df: pd.DataFrame):
     st.subheader(f"📈 {metrics['周期']} 核心数据")
     
-    # 添加导出按钮
     render_export_button(metrics, df, metrics['周期'])
     
     c1,c2,c3 = st.columns(3)
@@ -903,18 +855,13 @@ def render_monthly_analysis(metrics: Dict, df: pd.DataFrame):
                     else: 
                         st.success(f"均单利润{unit_profit:.2f}元 正常（≥{unit_profit_threshold}元）")
 
-def render_double_month_analysis(curr: Dict, last: Dict):
+# 🔴 修复后的 render_double_month_analysis 函数
+def render_double_month_analysis(curr: Dict, last: Dict, curr_df: pd.DataFrame, last_df: pd.DataFrame):
     st.subheader("🔍 双月详细对比分析")
     
-    # 添加导出按钮
-    render_double_export_button(curr, last, st.session_state.df_current, st.session_state.df_last)
+    # 添加导出按钮，直接传入DataFrame
+    render_double_export_button(curr, last, curr_df, last_df)
     
-    base_metrics = [
-        "店铺数量", "交易收入", "订单毛利", "订单毛利率", "运营毛利", "运营毛利率",
-        "商品成本", "商品成本占比", "人工成本", "人工成本占比", 
-        "头程运费", "头程运费占比", "退回运费", "退回运费占比",
-        "罚款金额", "罚款金额占比", "售后净额", "售后净额占比"
-    ]
     compare_data = {
         "指标名称": [
             "店铺数量", "交易收入(元)", "订单毛利(元)", "订单毛利率(%)", 
@@ -1062,7 +1009,6 @@ def render_shop_margin_ranking(metrics_current: Dict, metrics_last: Dict) -> Opt
     rank_df["运营毛利_本月(元)"] = shop_curr["运营毛利"].round(CONFIG["DECIMAL_PLACES"])
     rank_df["运营毛利_差异(元)"] = (rank_df["运营毛利_本月(元)"] - rank_df["运营毛利_上月(元)"]).round(CONFIG["DECIMAL_PLACES"])
     rank_df["运营毛利_环比(%)"] = calculate_margin_ratio(rank_df["运营毛利_差异(元)"], rank_df["运营毛利_上月(元)"])
-    # 新增毛利率、客单价、均单利润排名字段
     rank_df["订单毛利率_上月(%)"] = shop_last["订单毛利率(%)"].round(CONFIG["DECIMAL_PLACES"])
     rank_df["订单毛利率_本月(%)"] = shop_curr["订单毛利率(%)"].round(CONFIG["DECIMAL_PLACES"])
     rank_df["运营毛利率_上月(%)"] = shop_last["运营毛利率(%)"].round(CONFIG["DECIMAL_PLACES"])
@@ -1076,7 +1022,6 @@ def render_shop_margin_ranking(metrics_current: Dict, metrics_last: Dict) -> Opt
         rank_df["销售数量_上月"] = shop_last["销售数量"].fillna(0).astype(int)
         rank_df["销售数量_本月"] = shop_curr["销售数量"].fillna(0).astype(int)
         rank_df["销量差异"] = rank_df["销售数量_本月"] - rank_df["销售数量_上月"]
-        # 客单价、均单利润
         rank_df["客单价_上月(元/单)"] = shop_last["客单价(元/单)"].round(CONFIG["DECIMAL_PLACES"])
         rank_df["客单价_本月(元/单)"] = shop_curr["客单价(元/单)"].round(CONFIG["DECIMAL_PLACES"])
         rank_df["均单利润_上月(元/单)"] = shop_last["均单利润(元/单)"].round(CONFIG["DECIMAL_PLACES"])
@@ -1084,12 +1029,8 @@ def render_shop_margin_ranking(metrics_current: Dict, metrics_last: Dict) -> Opt
     rank_df = rank_df.sort_values("运营毛利_差异(元)", ascending=False)
     rank_df.insert(0, "排名", range(1, len(rank_df)+1))
 
-    # 应用阈值标红样式
     styled_rank_df = highlight_threshold_values(rank_df, st.session_state.alert_config)
-    st.dataframe(
-        styled_rank_df,
-        use_container_width=True
-    )
+    st.dataframe(styled_rank_df, use_container_width=True)
     if len(rank_df) > 0:
         top_shop = rank_df.index[0]
         top_growth = rank_df["运营毛利_差异(元)"].iloc[0]
@@ -1110,7 +1051,6 @@ def render_sales_margin_ranking(metrics_current: Dict, metrics_last: Dict) -> Op
     rank_df["运营毛利_本月(元)"] = sales_curr["运营毛利"].round(CONFIG["DECIMAL_PLACES"])
     rank_df["运营毛利_差异(元)"] = (rank_df["运营毛利_本月(元)"] - rank_df["运营毛利_上月(元)"]).round(CONFIG["DECIMAL_PLACES"])
     rank_df["运营毛利_环比(%)"] = calculate_margin_ratio(rank_df["运营毛利_差异(元)"], rank_df["运营毛利_上月(元)"])
-    # 新增毛利率、客单价、均单利润排名字段
     rank_df["订单毛利率_上月(%)"] = sales_last["订单毛利率(%)"].round(CONFIG["DECIMAL_PLACES"])
     rank_df["订单毛利率_本月(%)"] = sales_curr["订单毛利率(%)"].round(CONFIG["DECIMAL_PLACES"])
     rank_df["运营毛利率_上月(%)"] = sales_last["运营毛利率(%)"].round(CONFIG["DECIMAL_PLACES"])
@@ -1124,7 +1064,6 @@ def render_sales_margin_ranking(metrics_current: Dict, metrics_last: Dict) -> Op
         rank_df["销售数量_上月"] = sales_last["销售数量"].fillna(0).astype(int)
         rank_df["销售数量_本月"] = sales_curr["销售数量"].fillna(0).astype(int)
         rank_df["销量差异"] = rank_df["销售数量_本月"] - rank_df["销售数量_上月"]
-        # 客单价、均单利润
         rank_df["客单价_上月(元/单)"] = sales_last["客单价(元/单)"].round(CONFIG["DECIMAL_PLACES"])
         rank_df["客单价_本月(元/单)"] = sales_curr["客单价(元/单)"].round(CONFIG["DECIMAL_PLACES"])
         rank_df["均单利润_上月(元/单)"] = sales_last["均单利润(元/单)"].round(CONFIG["DECIMAL_PLACES"])
@@ -1132,12 +1071,8 @@ def render_sales_margin_ranking(metrics_current: Dict, metrics_last: Dict) -> Op
     rank_df = rank_df.sort_values("运营毛利_差异(元)", ascending=False)
     rank_df.insert(0, "排名", range(1, len(rank_df)+1))
 
-    # 应用阈值标红样式
     styled_rank_df = highlight_threshold_values(rank_df, st.session_state.alert_config)
-    st.dataframe(
-        styled_rank_df,
-        use_container_width=True
-    )
+    st.dataframe(styled_rank_df, use_container_width=True)
     if len(rank_df) > 0:
         top_sales = rank_df.index[0]
         top_growth = rank_df["运营毛利_差异(元)"].iloc[0]
@@ -1155,16 +1090,13 @@ def render_sales_double_month_analysis(metrics_current: Dict, metrics_last: Dict
 
 # ===================== 主入口 =====================
 def main():
-    # 侧边栏
     with st.sidebar:
         st.image("https://img.icons8.com/fluency/96/000000/bar-chart.png", width=100)
         st.title("📌 功能菜单")
 
-        # 先进行密码验证
         if not check_password():
-            st.stop()  # 密码错误或未登录时停止执行后续代码
+            st.stop()
 
-        # 密码验证通过后显示菜单
         menu_option = st.radio(
             "选择页面",
             [
@@ -1186,12 +1118,10 @@ def main():
         st.info("💡 按模板填写后上传即可自动分析")
         return
 
-    # 警戒值设置页面
     if menu_option == "⚙️ 警戒值设置":
         render_alert_config_panel()
         return
 
-    # 数据上传区域
     with st.sidebar:
         st.divider()
         uploaded_file1 = st.file_uploader(
@@ -1204,7 +1134,6 @@ def main():
     df_current = read_data(uploaded_file1)
     df_last = read_data(uploaded_file2)
 
-    # 保存到session_state供导出使用
     st.session_state.df_current = df_current
     st.session_state.df_last = df_last
 
@@ -1223,7 +1152,8 @@ def main():
             return
         metrics_current = calculate_metrics(df_current, "本月")
         metrics_last = calculate_metrics(df_last, "上月")
-        render_double_month_analysis(metrics_current, metrics_last)
+        # 🔴 修复：传入DataFrame参数
+        render_double_month_analysis(metrics_current, metrics_last, df_current, df_last)
         render_shop_margin_ranking(metrics_current, metrics_last)
         render_sales_margin_ranking(metrics_current, metrics_last)
 
