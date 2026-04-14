@@ -54,17 +54,17 @@ def load_alert_config():
             return {
                 "ORDER_MARGIN_RATE_THRESHOLD": 20.0,
                 "OPERATE_MARGIN_RATE_THRESHOLD": 15.0,
-                "SALES_QUANTITY_THRESHOLD": 100,
-                "UNIT_PRICE_THRESHOLD": 50.0,
-                "UNIT_PROFIT_THRESHOLD": 10.0
+                "SALES_QUANTITY_THRESHOLD": 3000,
+                "UNIT_PRICE_THRESHOLD": 10.0,
+                "UNIT_PROFIT_THRESHOLD": 2.0
             }
     else:
         return {
             "ORDER_MARGIN_RATE_THRESHOLD": 20.0,
             "OPERATE_MARGIN_RATE_THRESHOLD": 15.0,
-            "SALES_QUANTITY_THRESHOLD": 100,
-            "UNIT_PRICE_THRESHOLD": 50.0,
-            "UNIT_PROFIT_THRESHOLD": 10.0
+            "SALES_QUANTITY_THRESHOLD": 3000,
+            "UNIT_PRICE_THRESHOLD": 10.0,
+            "UNIT_PROFIT_THRESHOLD": 2.0
         }
 
 def save_alert_config(config):
@@ -855,11 +855,10 @@ def render_monthly_analysis(metrics: Dict, df: pd.DataFrame):
                     else: 
                         st.success(f"均单利润{unit_profit:.2f}元 正常（≥{unit_profit_threshold}元）")
 
-# 🔴 修复后的 render_double_month_analysis 函数
+# ===================== 修复后的 render_double_month_analysis 函数 =====================
 def render_double_month_analysis(curr: Dict, last: Dict, curr_df: pd.DataFrame, last_df: pd.DataFrame):
     st.subheader("🔍 双月详细对比分析")
     
-    # 添加导出按钮，直接传入DataFrame
     render_double_export_button(curr, last, curr_df, last_df)
     
     compare_data = {
@@ -890,7 +889,7 @@ def render_double_month_analysis(curr: Dict, last: Dict, curr_df: pd.DataFrame, 
             curr["售后净额"], curr["售后净额占比"]
         ]
     }
-    # 新增客单价/均单利润对比
+    
     if curr["has_sales_quantity"] and last["has_sales_quantity"]:
         compare_data["指标名称"].extend([
             "销售数量(单)", "客单价(元/单)", "均单利润(元/单)",
@@ -904,16 +903,23 @@ def render_double_month_analysis(curr: Dict, last: Dict, curr_df: pd.DataFrame, 
             curr["销售数量总计"], curr["客单价(元/单)"], curr["均单利润(元/单)"],
             curr["单均订单毛利(元/单)"]
         ])
+    
     compare_df = pd.DataFrame(compare_data)
     compare_df["绝对差异"] = compare_df["本月数值"] - compare_df["上月数值"]
     compare_df["相对差异(%)"] = round(
         (compare_df["绝对差异"] / compare_df["上月数值"] * 100).replace([np.inf, -np.inf], 0),
         CONFIG["DECIMAL_PLACES"]
     )
-    st.dataframe(
-        compare_df.style.applymap(highlight_negative_values, subset=["绝对差异", "相对差异(%)"]),
-        use_container_width=True
+    
+    # 🔴 修复：使用 apply 代替 applymap
+    styled_compare = compare_df.style
+    styled_compare = styled_compare.apply(
+        lambda x: [highlight_negative_values(val) for val in x],
+        subset=["绝对差异", "相对差异(%)"]
     )
+    
+    st.dataframe(styled_compare, use_container_width=True)
+    
     st.markdown("### 关键金额指标双月对比")
     fig_amount = go.Figure()
     metrics_list = ["交易收入", "订单毛利", "运营毛利", "商品成本", "人工成本", "头程运费"]
@@ -932,6 +938,7 @@ def render_double_month_analysis(curr: Dict, last: Dict, curr_df: pd.DataFrame, 
         barmode='group'
     )
     st.plotly_chart(fig_amount, use_container_width=True)
+    
     if curr["has_sales_quantity"] and last["has_sales_quantity"]:
         st.markdown("### 销量&客单价/均单利润指标双月对比")
         fig_sales = go.Figure()
@@ -949,6 +956,7 @@ def render_double_month_analysis(curr: Dict, last: Dict, curr_df: pd.DataFrame, 
                                   textposition='outside'))
         fig_sales.update_layout(title='销量 & 客单价 & 均单利润对比', barmode='group')
         st.plotly_chart(fig_sales, use_container_width=True)
+    
     st.markdown("### 双月差异总结")
     income_diff = curr["交易收入"] - last["交易收入"]
     income_rate = calculate_margin_ratio(income_diff, last["交易收入"])
@@ -958,6 +966,7 @@ def render_double_month_analysis(curr: Dict, last: Dict, curr_df: pd.DataFrame, 
         st.error(f"❌ 交易收入环比下降 {format_currency(abs(income_diff))}（{abs(income_rate):.2f}%）")
     else:
         st.info(f"➡️ 交易收入环比无变化")
+    
     order_diff = curr["订单毛利"] - last["订单毛利"]
     order_rate = calculate_margin_ratio(order_diff, last["订单毛利"])
     if order_diff > 0:
@@ -966,6 +975,7 @@ def render_double_month_analysis(curr: Dict, last: Dict, curr_df: pd.DataFrame, 
         st.error(f"❌ 订单毛利环比下降 {format_currency(abs(order_diff))}（{abs(order_rate):.2f}%）")
     else:
         st.info(f"➡️ 订单毛利环比无变化")
+    
     if curr["has_sales_quantity"] and last["has_sales_quantity"]:
         qty_diff = curr["销售数量总计"] - last["销售数量总计"]
         qty_rate = calculate_margin_ratio(qty_diff, last["销售数量总计"])
@@ -993,6 +1003,7 @@ def render_double_month_analysis(curr: Dict, last: Dict, curr_df: pd.DataFrame, 
             st.error(f"❌ 均单利润环比下降 {abs(unit_profit_diff):.2f} 元（{abs(unit_profit_rate):.2f}%）")
         else:
             st.info(f"➡️ 均单利润环比无变化")
+    
     return compare_df
 
 def render_shop_margin_ranking(metrics_current: Dict, metrics_last: Dict) -> Optional[pd.DataFrame]:
@@ -1152,7 +1163,6 @@ def main():
             return
         metrics_current = calculate_metrics(df_current, "本月")
         metrics_last = calculate_metrics(df_last, "上月")
-        # 🔴 修复：传入DataFrame参数
         render_double_month_analysis(metrics_current, metrics_last, df_current, df_last)
         render_shop_margin_ranking(metrics_current, metrics_last)
         render_sales_margin_ranking(metrics_current, metrics_last)
