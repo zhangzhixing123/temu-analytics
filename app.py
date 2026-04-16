@@ -245,30 +245,6 @@ def highlight_threshold_values(df, alert_config):
     
     return styled_df
 
-def calculate_sales_per_unit(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    if '销售数量' not in df.columns:
-        return df
-    
-    df['销售数量'] = df['销售数量'].replace(0, np.nan)
-    sales_quantity = df['销售数量']
-    
-    df['单均订单毛利(元/单)'] = np.where(sales_quantity.notna(),
-                                      round(df['订单毛利'] / sales_quantity, CONFIG["DECIMAL_PLACES"]), 0.0)
-    df['单均商品成本(元/单)'] = np.where(sales_quantity.notna(),
-                                     round(df['商品成本'] / sales_quantity, CONFIG["DECIMAL_PLACES"]), 0.0)
-    
-    df['客单价(元/单)'] = np.where(sales_quantity.notna(),
-                                round(df['交易收入'] / sales_quantity, CONFIG["DECIMAL_PLACES"]), 0.0)
-    df['均单利润(元/单)'] = np.where(sales_quantity.notna() & df['运营毛利'].notna(),
-                                   round(df['运营毛利'] / sales_quantity, CONFIG["DECIMAL_PLACES"]), 0.0)
-    
-    df['订单毛利率(%)'] = calculate_margin_ratio(df['订单毛利'], df['交易收入'])
-    df['运营毛利率(%)'] = calculate_margin_ratio(df['运营毛利'], df['交易收入'])
-    
-    df['销售数量'] = df['销售数量'].fillna(0).astype(int)
-    return df
-
 def format_currency(value: float) -> str:
     return f"¥{value:,.{CONFIG['DECIMAL_PLACES']}f}"
 
@@ -318,11 +294,138 @@ def generate_upload_template() -> bytes:
     output.seek(0)
     return output.getvalue()
 
-# ===================== 核心计算函数 =====================
+# ===================== 🔧 修复后的核心计算函数 =====================
+def preprocess_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """预处理数据：确保所有必要列存在，类型正确"""
+    df = df.copy()
+    
+    # 1. 确保所有必要列都存在
+    required_cols = ['交易收入', '商品成本', '运营毛利']
+    for col in required_cols:
+        if col not in df.columns:
+            df[col] = 0
+    
+    # 2. 确保数值类型正确
+    numeric_cols = ['交易收入', '商品成本', '运营毛利', '头程运费', '耗材成本', 
+                    '人工成本', '退回运费', '罚款金额', '店铺总计提金额',
+                    '消费者售后预留金额', '消费者售后释放金额']
+    if '销售数量' in df.columns:
+        numeric_cols.append('销售数量')
+    
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    
+    # 3. 如果有销售数量列，检查并修复数据完整性
+    if '销售数量' in df.columns:
+        # 找出销售数量非空但运营毛利为空的异常行
+        has_sales_no_profit = (df['销售数量'] != 0) & (df['运营毛利'] == 0)
+        if has_sales_no_profit.any():
+            # 尝试从交易收入计算运营毛利（估算）
+            count = has_sales_no_profit.sum()
+            st.warning(f"⚠️ 发现 {count} 行有销售数量但无运营毛利")
+    
+    return df
+
+def calculate_order_margin(df: pd.DataFrame) -> pd.DataFrame:
+    """计算订单毛利（修复了类型不一致问题）"""
+    components = []
+    
+    if '交易收入' in df.columns:
+        components.append(df['交易收入'])
+    if '头程运费' in df.columns:
+        components.append(-df['头程运费'])
+    if '耗材成本' in df.columns:
+        components.append(-df['耗材成本'])
+    if '人工成本' in df.columns:
+        components.append(-df['人工成本'])
+    if '商品成本' in df.columns:
+        components.append(-df['商品成本'])
+    if '消费者售后预留金额' in df.columns:
+        components.append(-df['消费者售后预留金额'])
+    if '消费者售后释放金额' in df.columns:
+        components.append(df['消费者售后释放金额'])
+    
+    if components:
+        df['订单毛利'] = pd.concat(components, axis=1).sum(axis=1)
+    else:
+        df['订单毛利'] = 0
+    
+    return df
+
+def calculate_sales_per_unit(df: pd.DataFrame) -> pd.DataFrame:
+    """计算单均指标（修复了跨行计算问题）"""
+    df = df.copy()
+    
+    if '销售数量' not in df.columns:
+        return df
+    
+    # 保存原始销售数量用于恢复
+    original_sales = df['销售数量'].copy()
+    
+    # 处理销售数量为0的情况（避免除零）
+    df['销售数量'] = df['销售数量'].replace(0, np.nan)
+    sales_quantity = df['销售数量']
+    
+    # 创建有效计算掩码
+    valid_mask = sales_quantity.notna()
+    
+    # 初始化各列为0
+    df['单均订单毛利(元/单)'] = 0.0
+    df['单均商品成本(元/单)'] = 0.0
+    df['客单价(元/单)'] = 0.0
+    df['均单利润(元/单)'] = 0.0
+    
+    # 仅对有效行进行计算（使用 loc 确保是同一行数据）
+    if valid_mask.any():
+        if '订单毛利' in df.columns:
+            df.loc[valid_mask, '单均订单毛利(元/单)'] = round(
+                df.loc[valid_mask, '订单毛利'] / df.loc[valid_mask, '销售数量'], 
+                CONFIG["DECIMAL_PLACES"]
+            )
+        
+        if '商品成本' in df.columns:
+            df.loc[valid_mask, '单均商品成本(元/单)'] = round(
+                df.loc[valid_mask, '商品成本'] / df.loc[valid_mask, '销售数量'], 
+                CONFIG["DECIMAL_PLACES"]
+            )
+        
+        if '交易收入' in df.columns:
+            df.loc[valid_mask, '客单价(元/单)'] = round(
+                df.loc[valid_mask, '交易收入'] / df.loc[valid_mask, '销售数量'], 
+                CONFIG["DECIMAL_PLACES"]
+            )
+        
+        if '运营毛利' in df.columns:
+            # 同时检查运营毛利非空
+            profit_valid = valid_mask & (df['运营毛利'].notna())
+            df.loc[profit_valid, '均单利润(元/单)'] = round(
+                df.loc[profit_valid, '运营毛利'] / df.loc[profit_valid, '销售数量'], 
+                CONFIG["DECIMAL_PLACES"]
+            )
+    
+    # 恢复销售数量（0值恢复为0）
+    df['销售数量'] = original_sales.fillna(0).astype(int)
+    
+    # 计算毛利率（按行）
+    if '订单毛利' in df.columns and '交易收入' in df.columns:
+        df['订单毛利率(%)'] = calculate_margin_ratio(df['订单毛利'], df['交易收入'])
+    if '运营毛利' in df.columns and '交易收入' in df.columns:
+        df['运营毛利率(%)'] = calculate_margin_ratio(df['运营毛利'], df['交易收入'])
+    
+    return df
+
 def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
     if df is None or df.empty:
         return None
-
+    
+    # ========== 数据预处理 ==========
+    df = preprocess_dataframe(df)
+    
+    # ========== 计算订单毛利 ==========
+    df = calculate_order_margin(df)
+    
+    # ========== 初始化指标字典 ==========
     metrics = {
         "周期": period_name,
         "店铺数量": len(df),
@@ -346,7 +449,8 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
         "店铺数据": {},
         "sales_data": {}
     }
-
+    
+    # ========== 汇总指标 ==========
     metrics["交易收入"] = round(df.get('交易收入', 0).sum(), CONFIG["DECIMAL_PLACES"])
     metrics["罚款金额"] = round(df.get('罚款金额', 0).sum(), CONFIG["DECIMAL_PLACES"])
     metrics["运营毛利"] = round(df.get('运营毛利', 0).sum(), CONFIG["DECIMAL_PLACES"])
@@ -359,19 +463,11 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
     metrics["消费者售后预留金额"] = round(df.get('消费者售后预留金额', 0).sum(), CONFIG["DECIMAL_PLACES"])
     metrics["消费者售后释放金额"] = round(df.get('消费者售后释放金额', 0).sum(), CONFIG["DECIMAL_PLACES"])
     metrics["售后净额"] = round(metrics["消费者售后预留金额"] - metrics["消费者售后释放金额"], CONFIG["DECIMAL_PLACES"])
-
-    order_margin_components = [
-        df.get('交易收入', 0),
-        -df.get('头程运费', 0),
-        -df.get('耗材成本', 0),
-        -df.get('人工成本', 0),
-        -df.get('商品成本', 0),
-        -df.get('消费者售后预留金额', 0),
-        df.get('消费者售后释放金额', 0)
-    ]
-    df['订单毛利'] = pd.concat(order_margin_components, axis=1).sum(axis=1)
+    
+    # 订单毛利汇总
     metrics["订单毛利"] = round(df['订单毛利'].sum(), CONFIG["DECIMAL_PLACES"])
-
+    
+    # ========== 占比计算 ==========
     metrics["订单毛利率"] = calculate_margin_ratio(metrics["订单毛利"], metrics["交易收入"])
     metrics["运营毛利率"] = calculate_margin_ratio(metrics["运营毛利"], metrics["交易收入"])
     metrics["商品成本占比"] = calculate_margin_ratio(metrics["商品成本"], metrics["交易收入"])
@@ -382,7 +478,8 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
     metrics["罚款金额占比"] = calculate_margin_ratio(metrics["罚款金额"], metrics["交易收入"])
     metrics["店铺总计提占比"] = calculate_margin_ratio(metrics["店铺总计提金额"], metrics["交易收入"])
     metrics["售后净额占比"] = calculate_margin_ratio(metrics["售后净额"], metrics["交易收入"])
-
+    
+    # ========== 销量相关指标 ==========
     if metrics["has_sales_quantity"]:
         try:
             sales_series = df['销售数量'].fillna(0)
@@ -395,9 +492,12 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
         except Exception as e:
             metrics["销售数量总计"] = 0
             st.warning(f"⚠️ 销售数量字段格式异常，已跳过销量相关指标计算：{str(e)}")
-
+    
+    # ========== 店铺维度分析 ==========
     if 'OA店铺名称' in df.columns:
+        # 先计算单均指标
         df = calculate_sales_per_unit(df)
+        
         agg_cols = {
             '交易收入': lambda x: round(x.sum(), CONFIG["DECIMAL_PLACES"]),
             '订单毛利': lambda x: round(x.sum(), CONFIG["DECIMAL_PLACES"]),
@@ -413,6 +513,7 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
             '消费者售后释放金额': lambda x: round(x.sum(), CONFIG["DECIMAL_PLACES"]),
             'OA店铺名称': 'count'
         }
+        
         if metrics["has_sales_quantity"]:
             agg_cols.update({
                 '销售数量': 'sum',
@@ -423,10 +524,14 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
                 '订单毛利率(%)': lambda x: round(x.mean(), CONFIG["DECIMAL_PLACES"]),
                 '运营毛利率(%)': lambda x: round(x.mean(), CONFIG["DECIMAL_PLACES"])
             })
+        
         shop_agg = df.groupby('OA店铺名称').agg(agg_cols).rename(columns={'OA店铺名称': '店铺数量'})
         shop_agg['店铺数量'] = shop_agg['店铺数量'].astype(int)
+        
         if metrics["has_sales_quantity"]:
             shop_agg['销售数量'] = shop_agg['销售数量'].fillna(0).astype(int)
+        
+        # 补充毛利率计算
         shop_agg['订单毛利率(%)'] = calculate_margin_ratio(shop_agg['订单毛利'], shop_agg['交易收入'])
         shop_agg['运营毛利率(%)'] = calculate_margin_ratio(shop_agg['运营毛利'], shop_agg['交易收入'])
         shop_agg['商品成本占比(%)'] = calculate_margin_ratio(shop_agg['商品成本'], shop_agg['交易收入'])
@@ -438,10 +543,13 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
         shop_agg['店铺总计提占比(%)'] = calculate_margin_ratio(shop_agg['店铺总计提金额'], shop_agg['交易收入'])
         shop_agg['售后净额'] = shop_agg['消费者售后预留金额'] - shop_agg['消费者售后释放金额']
         shop_agg['售后净额占比(%)'] = calculate_margin_ratio(shop_agg['售后净额'], shop_agg['交易收入'])
+        
         metrics["店铺数据"] = shop_agg.to_dict('index')
-
+    
+    # ========== 销售员维度分析 ==========
     if '销售员' in df.columns:
         df = calculate_sales_per_unit(df)
+        
         agg_cols = {
             '销售员': 'count',
             '交易收入': lambda x: round(x.sum(), CONFIG["DECIMAL_PLACES"]),
@@ -457,6 +565,7 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
             '消费者售后预留金额': lambda x: round(x.sum(), CONFIG["DECIMAL_PLACES"]),
             '消费者售后释放金额': lambda x: round(x.sum(), CONFIG["DECIMAL_PLACES"])
         }
+        
         if metrics["has_sales_quantity"]:
             agg_cols.update({
                 '销售数量': 'sum',
@@ -467,10 +576,14 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
                 '订单毛利率(%)': lambda x: round(x.mean(), CONFIG["DECIMAL_PLACES"]),
                 '运营毛利率(%)': lambda x: round(x.mean(), CONFIG["DECIMAL_PLACES"])
             })
+        
         sales_agg = df.groupby('销售员').agg(agg_cols).rename(columns={'销售员': '店铺数量'})
         sales_agg['店铺数量'] = sales_agg['店铺数量'].astype(int)
+        
         if metrics["has_sales_quantity"]:
             sales_agg['销售数量'] = sales_agg['销售数量'].fillna(0).astype(int)
+        
+        # 补充毛利率计算
         sales_agg['订单毛利率(%)'] = calculate_margin_ratio(sales_agg['订单毛利'], sales_agg['交易收入'])
         sales_agg['运营毛利率(%)'] = calculate_margin_ratio(sales_agg['运营毛利'], sales_agg['交易收入'])
         sales_agg['罚款占收入比(%)'] = calculate_margin_ratio(sales_agg['罚款金额'], sales_agg['交易收入'])
@@ -482,8 +595,9 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
         sales_agg['店铺总计提占比(%)'] = calculate_margin_ratio(sales_agg['店铺总计提金额'], sales_agg['交易收入'])
         sales_agg['售后净额'] = sales_agg['消费者售后预留金额'] - sales_agg['消费者售后释放金额']
         sales_agg['售后净额占比(%)'] = calculate_margin_ratio(sales_agg['售后净额'], sales_agg['交易收入'])
+        
         metrics["sales_data"] = sales_agg.to_dict('index')
-
+    
     return metrics
 
 # ===================== 可视化函数 =====================
@@ -855,7 +969,7 @@ def render_monthly_analysis(metrics: Dict, df: pd.DataFrame):
                     else: 
                         st.success(f"均单利润{unit_profit:.2f}元 正常（≥{unit_profit_threshold}元）")
 
-# ===================== 修复后的 render_double_month_analysis 函数 =====================
+# ===================== 双月对比分析函数 =====================
 def render_double_month_analysis(curr: Dict, last: Dict, curr_df: pd.DataFrame, last_df: pd.DataFrame):
     st.subheader("🔍 双月详细对比分析")
     
@@ -911,7 +1025,7 @@ def render_double_month_analysis(curr: Dict, last: Dict, curr_df: pd.DataFrame, 
         CONFIG["DECIMAL_PLACES"]
     )
     
-    # 🔴 修复：使用 apply 代替 applymap
+    # 应用样式
     styled_compare = compare_df.style
     styled_compare = styled_compare.apply(
         lambda x: [highlight_negative_values(val) for val in x],
