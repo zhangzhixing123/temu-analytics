@@ -198,15 +198,6 @@ def highlight_negative_values(val):
             return 'color: red; font-weight: bold'
     return ''
 
-def to_excel(df_dict: dict) -> bytes:
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        for sheet_name, df in df_dict.items():
-            safe_sheet_name = sheet_name[:30]
-            df.to_excel(writer, sheet_name=safe_sheet_name, index=True)
-    output.seek(0)
-    return output.getvalue()
-
 def generate_upload_template() -> bytes:
     template_cols = ["OA店铺名称", "销售员", "交易收入", "商品成本", "耗材成本", "人工成本",
                      "头程运费", "退回运费", "消费者售后预留金额", "消费者售后释放金额",
@@ -401,7 +392,7 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
         
         metrics["店铺数据"] = shop_agg.to_dict('index')
     
-    # 销售员分析
+    # 销售员分析 - 修复：添加成本占比计算
     if '销售员' in df.columns and metrics["has_sales_quantity"]:
         sales_agg = df.groupby('销售员').agg({
             '交易收入': 'sum', '订单毛利': 'sum', '运营毛利': 'sum',
@@ -417,6 +408,17 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
         sales_agg['均单利润(元/单)'] = round(sales_agg['运营毛利'] / sales_agg['销售数量'], 2)
         sales_agg['单均订单毛利(元/单)'] = round(sales_agg['订单毛利'] / sales_agg['销售数量'], 2)
         sales_agg['单均商品成本(元/单)'] = round(sales_agg['商品成本'] / sales_agg['销售数量'], 2)
+        
+        # 修复：添加成本占比计算（和店铺成本占比相同的公式）
+        sales_agg['商品成本占比(%)'] = calculate_margin_ratio(sales_agg['商品成本'], sales_agg['交易收入'])
+        sales_agg['耗材成本占比(%)'] = calculate_margin_ratio(sales_agg['耗材成本'], sales_agg['交易收入'])
+        sales_agg['人工成本占比(%)'] = calculate_margin_ratio(sales_agg['人工成本'], sales_agg['交易收入'])
+        sales_agg['头程运费占比(%)'] = calculate_margin_ratio(sales_agg['头程运费'], sales_agg['交易收入'])
+        sales_agg['退回运费占比(%)'] = calculate_margin_ratio(sales_agg['退回运费'], sales_agg['交易收入'])
+        sales_agg['罚款金额占比(%)'] = calculate_margin_ratio(sales_agg['罚款金额'], sales_agg['交易收入'])
+        sales_agg['店铺总计提占比(%)'] = calculate_margin_ratio(sales_agg['店铺总计提金额'], sales_agg['交易收入'])
+        sales_agg['售后净额'] = sales_agg['消费者售后预留金额'] - sales_agg['消费者售后释放金额']
+        sales_agg['售后净额占比(%)'] = calculate_margin_ratio(sales_agg['售后净额'], sales_agg['交易收入'])
         
         metrics["sales_data"] = sales_agg.to_dict('index')
     
@@ -655,6 +657,7 @@ def render_monthly_analysis(metrics, df):
         sales = st.multiselect("选择销售员", list(sales_df.index), default=list(sales_df.index)[:5] if len(sales_df) >= 5 else list(sales_df.index))
         if sales:
             st.dataframe(highlight_threshold_values(sales_df.loc[sales], st.session_state.alert_config), use_container_width=True)
+            # 销售员成本占比图形（和店铺成本占比使用相同公式）
             st.plotly_chart(plot_cost_ratio_chart(sales_df, '销售员成本占比', sales), use_container_width=True)
             if metrics["has_sales_quantity"] and '销售数量' in sales_df.columns:
                 st.plotly_chart(plot_sales_quantity_chart(sales_df, '销售员销量排名', sales), use_container_width=True)
