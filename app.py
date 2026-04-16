@@ -9,7 +9,7 @@ from io import BytesIO
 import json
 import os
 
-# ===================== 全局配置与常量定义 =====================
+# ===================== 全局配置 =====================
 st.set_page_config(page_title="Temu店铺数据分析工具", layout="wide")
 st.title("📊 Temu 店铺数据分析工具（双月对比+销量分析版）")
 
@@ -69,7 +69,7 @@ def save_alert_config(config):
 if 'alert_config' not in st.session_state:
     st.session_state.alert_config = load_alert_config()
 
-# ===================== 密码验证函数 =====================
+# ===================== 密码验证 =====================
 def check_password():
     st.sidebar.markdown("---")
     st.sidebar.subheader("🔐 登录")
@@ -224,7 +224,7 @@ def generate_upload_template() -> bytes:
     output.seek(0)
     return output.getvalue()
 
-# ===================== 🔧 修复后的核心计算函数 =====================
+# ===================== 核心计算函数 =====================
 def preprocess_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """预处理：确保数值类型正确"""
     df = df.copy()
@@ -239,7 +239,7 @@ def preprocess_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def calculate_order_margin(df: pd.DataFrame) -> pd.DataFrame:
-    """计算订单毛利（修复类型不一致）"""
+    """计算订单毛利"""
     components = []
     if '交易收入' in df.columns:
         components.append(df['交易收入'])
@@ -262,7 +262,7 @@ def calculate_order_margin(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def calculate_sales_per_unit(df: pd.DataFrame) -> pd.DataFrame:
-    """计算单均指标（修复跨行问题）"""
+    """计算单均指标"""
     df = df.copy()
     if '销售数量' not in df.columns:
         return df
@@ -300,26 +300,35 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
     if df is None or df.empty:
         return None
     
-    # 保存原始数据副本（用于销售员分析和导出）
+    # 保存原始数据副本
     original_df = df.copy()
     df = preprocess_dataframe(df)
     df = calculate_order_margin(df)
     df = calculate_sales_per_unit(df)
     
     metrics = {
-        "周期": period_name, "店铺数量": len(df), "交易收入": 0.0, "订单毛利": 0.0,
-        "订单毛利率": 0.0, "运营毛利": 0.0, "运营毛利率": 0.0,
-        "商品成本": 0.0, "耗材成本": 0.0, "人工成本": 0.0, "头程运费": 0.0,
-        "退回运费": 0.0, "罚款金额": 0.0, "店铺总计提金额": 0.0,
-        "消费者售后预留金额": 0.0, "消费者售后释放金额": 0.0, "售后净额": 0.0,
+        "周期": period_name,
+        "店铺数量": len(df),
+        "交易收入": 0.0,
+        "订单毛利": 0.0,
+        "订单毛利率": 0.0,
+        "运营毛利": 0.0,
+        "运营毛利率": 0.0,
+        "商品成本": 0.0, "耗材成本": 0.0, "人工成本": 0.0,
+        "头程运费": 0.0, "退回运费": 0.0, "罚款金额": 0.0,
+        "店铺总计提金额": 0.0, "消费者售后预留金额": 0.0, "消费者售后释放金额": 0.0, "售后净额": 0.0,
         "商品成本占比": 0.0, "耗材成本占比": 0.0, "人工成本占比": 0.0,
         "头程运费占比": 0.0, "退回运费占比": 0.0, "罚款金额占比": 0.0,
-        "店铺总计提占比": 0.0, "售后净额占比": 0.0, "销售数量总计": 0,
-        "单均订单毛利(元/单)": 0.0, "单均商品成本(元/单)": 0.0,
-        "客单价(元/单)": 0.0, "均单利润(元/单)": 0.0,
+        "店铺总计提占比": 0.0, "售后净额占比": 0.0,
+        "销售数量总计": 0,
+        "单均订单毛利(元/单)": 0.0,
+        "单均商品成本(元/单)": 0.0,
+        "客单价(元/单)": 0.0,
+        "均单利润(元/单)": 0.0,
         "has_sales_quantity": '销售数量' in df.columns,
-        "店铺数据": {}, "sales_data": {},
-        "original_df": original_df  # 保存原始数据用于导出
+        "店铺数据": {},
+        "sales_data": {},
+        "original_df": original_df
     }
     
     # 汇总
@@ -364,34 +373,51 @@ def calculate_metrics(df: pd.DataFrame, period_name: str) -> Optional[Dict]:
     
     # 店铺分析
     if 'OA店铺名称' in df.columns:
-        agg_cols = {c: 'sum' for c in ['交易收入', '订单毛利', '运营毛利', '商品成本', '耗材成本', 
-                                        '人工成本', '头程运费', '退回运费', '罚款金额', '店铺总计提金额',
-                                        '消费者售后预留金额', '消费者售后释放金额']}
-        agg_cols['OA店铺名称'] = 'count'
+        shop_agg = df.groupby('OA店铺名称').agg({
+            '交易收入': 'sum', '订单毛利': 'sum', '运营毛利': 'sum',
+            '商品成本': 'sum', '耗材成本': 'sum', '人工成本': 'sum',
+            '头程运费': 'sum', '退回运费': 'sum', '罚款金额': 'sum',
+            '店铺总计提金额': 'sum', '消费者售后预留金额': 'sum', '消费者售后释放金额': 'sum'
+        })
         if metrics["has_sales_quantity"]:
-            agg_cols.update({'销售数量': 'sum', '单均订单毛利(元/单)': 'mean', '单均商品成本(元/单)': 'mean',
-                            '客单价(元/单)': 'mean', '均单利润(元/单)': 'mean', '订单毛利率(%)': 'mean', '运营毛利率(%)': 'mean'})
-        shop_agg = df.groupby('OA店铺名称').agg(agg_cols).rename(columns={'OA店铺名称': '店铺数量'})
-        shop_agg['店铺数量'] = shop_agg['店铺数量'].astype(int)
-        if metrics["has_sales_quantity"]:
-            shop_agg['销售数量'] = shop_agg['销售数量'].fillna(0).astype(int)
+            shop_agg['销售数量'] = df.groupby('OA店铺名称')['销售数量'].sum()
+            shop_agg['单均订单毛利(元/单)'] = round(shop_agg['订单毛利'] / shop_agg['销售数量'], 2)
+            shop_agg['单均商品成本(元/单)'] = round(shop_agg['商品成本'] / shop_agg['销售数量'], 2)
+            shop_agg['客单价(元/单)'] = round(shop_agg['交易收入'] / shop_agg['销售数量'], 2)
+            shop_agg['均单利润(元/单)'] = round(shop_agg['运营毛利'] / shop_agg['销售数量'], 2)
+        
+        shop_agg['店铺数量'] = df.groupby('OA店铺名称').size()
         shop_agg['订单毛利率(%)'] = calculate_margin_ratio(shop_agg['订单毛利'], shop_agg['交易收入'])
         shop_agg['运营毛利率(%)'] = calculate_margin_ratio(shop_agg['运营毛利'], shop_agg['交易收入'])
+        shop_agg['商品成本占比(%)'] = calculate_margin_ratio(shop_agg['商品成本'], shop_agg['交易收入'])
+        shop_agg['耗材成本占比(%)'] = calculate_margin_ratio(shop_agg['耗材成本'], shop_agg['交易收入'])
+        shop_agg['人工成本占比(%)'] = calculate_margin_ratio(shop_agg['人工成本'], shop_agg['交易收入'])
+        shop_agg['头程运费占比(%)'] = calculate_margin_ratio(shop_agg['头程运费'], shop_agg['交易收入'])
+        shop_agg['退回运费占比(%)'] = calculate_margin_ratio(shop_agg['退回运费'], shop_agg['交易收入'])
+        shop_agg['罚款金额占比(%)'] = calculate_margin_ratio(shop_agg['罚款金额'], shop_agg['交易收入'])
+        shop_agg['店铺总计提占比(%)'] = calculate_margin_ratio(shop_agg['店铺总计提金额'], shop_agg['交易收入'])
+        shop_agg['售后净额'] = shop_agg['消费者售后预留金额'] - shop_agg['消费者售后释放金额']
+        shop_agg['售后净额占比(%)'] = calculate_margin_ratio(shop_agg['售后净额'], shop_agg['交易收入'])
+        
         metrics["店铺数据"] = shop_agg.to_dict('index')
     
-    # 销售员分析（使用原始数据）
+    # 销售员分析
     if '销售员' in df.columns and metrics["has_sales_quantity"]:
         sales_agg = df.groupby('销售员').agg({
-            '交易收入': 'sum', '订单毛利': 'sum', '运营毛利': 'sum', '商品成本': 'sum',
-            '耗材成本': 'sum', '人工成本': 'sum', '头程运费': 'sum', '退回运费': 'sum',
-            '罚款金额': 'sum', '店铺总计提金额': 'sum', '销售数量': 'sum',
-            '消费者售后预留金额': 'sum', '消费者售后释放金额': 'sum'
+            '交易收入': 'sum', '订单毛利': 'sum', '运营毛利': 'sum',
+            '商品成本': 'sum', '耗材成本': 'sum', '人工成本': 'sum',
+            '头程运费': 'sum', '退回运费': 'sum', '罚款金额': 'sum',
+            '店铺总计提金额': 'sum', '消费者售后预留金额': 'sum', '消费者售后释放金额': 'sum',
+            '销售数量': 'sum'
         })
-        sales_agg['店铺数量'] = sales_agg.groupby('销售员').size() if '销售员' in df.columns else 1
+        sales_agg['店铺数量'] = df.groupby('销售员').size()
         sales_agg['订单毛利率(%)'] = calculate_margin_ratio(sales_agg['订单毛利'], sales_agg['交易收入'])
         sales_agg['运营毛利率(%)'] = calculate_margin_ratio(sales_agg['运营毛利'], sales_agg['交易收入'])
         sales_agg['客单价(元/单)'] = round(sales_agg['交易收入'] / sales_agg['销售数量'], 2)
         sales_agg['均单利润(元/单)'] = round(sales_agg['运营毛利'] / sales_agg['销售数量'], 2)
+        sales_agg['单均订单毛利(元/单)'] = round(sales_agg['订单毛利'] / sales_agg['销售数量'], 2)
+        sales_agg['单均商品成本(元/单)'] = round(sales_agg['商品成本'] / sales_agg['销售数量'], 2)
+        
         metrics["sales_data"] = sales_agg.to_dict('index')
     
     return metrics
@@ -413,6 +439,10 @@ def plot_cost_ratio_chart(df, title, selected_items=None):
     cost_cols = [c for c in ['商品成本占比(%)', '耗材成本占比(%)', '人工成本占比(%)',
                              '头程运费占比(%)', '退回运费占比(%)', '罚款金额占比(%)',
                              '店铺总计提占比(%)', '售后净额占比(%)'] if c in df.columns]
+    if not cost_cols:
+        fig = go.Figure()
+        fig.add_annotation(text="无成本占比数据", x=0.5, y=0.5, showarrow=False)
+        return fig
     fig = go.Figure()
     colors = ['#FF6B6B','#4ECDC4','#45B7D1','#96CEB4','#FFEAA7','#DDA0DD','#98D8C8','#F7DC6F']
     for i, c in enumerate(cost_cols):
@@ -438,6 +468,12 @@ def plot_unit_metrics_chart(df, title, selected_items=None):
         df = df.loc[selected_items]
     up_thresh = st.session_state.alert_config["UNIT_PRICE_THRESHOLD"]
     uprof_thresh = st.session_state.alert_config["UNIT_PROFIT_THRESHOLD"]
+    
+    if '客单价(元/单)' not in df.columns or '均单利润(元/单)' not in df.columns:
+        fig = go.Figure()
+        fig.add_annotation(text="无客单价或均单利润数据", x=0.5, y=0.5, showarrow=False)
+        return fig
+    
     fig = go.Figure()
     fig.add_trace(go.Bar(x=df.index, y=df['客单价(元/单)'], name=f'客单价 (警戒值:{up_thresh}元)',
                          marker_color=['#d62728' if x < up_thresh else '#2ca02c' for x in df['客单价(元/单)']],
@@ -453,17 +489,25 @@ def plot_unit_metrics_chart(df, title, selected_items=None):
 def plot_sales_unit_metrics_chart(df, title, selected_items=None):
     if selected_items:
         df = df.loc[selected_items]
+    
     fig = go.Figure()
-    fig.add_trace(go.Bar(x=df.index, y=df['单均订单毛利(元/单)'], name='单均订单毛利', marker_color='#FFD700',
-                         text=df['单均订单毛利(元/单)'].apply(lambda x: f"¥{x:.2f}"), textposition='outside'))
-    fig.add_trace(go.Bar(x=df.index, y=df['单均商品成本(元/单)'], name='单均商品成本', marker_color='#DC143C',
-                         text=df['单均商品成本(元/单)'].apply(lambda x: f"¥{x:.2f}"), textposition='outside'))
+    
+    if '单均订单毛利(元/单)' in df.columns:
+        fig.add_trace(go.Bar(x=df.index, y=df['单均订单毛利(元/单)'], name='单均订单毛利', marker_color='#FFD700',
+                             text=df['单均订单毛利(元/单)'].apply(lambda x: f"¥{x:.2f}"), textposition='outside'))
+    
+    if '单均商品成本(元/单)' in df.columns:
+        fig.add_trace(go.Bar(x=df.index, y=df['单均商品成本(元/单)'], name='单均商品成本', marker_color='#DC143C',
+                             text=df['单均商品成本(元/单)'].apply(lambda x: f"¥{x:.2f}"), textposition='outside'))
+    
     if '客单价(元/单)' in df.columns:
         fig.add_trace(go.Bar(x=df.index, y=df['客单价(元/单)'], name='客单价', marker_color='#8A2BE2',
                              text=df['客单价(元/单)'].apply(lambda x: f"¥{x:.2f}"), textposition='outside'))
+    
     if '均单利润(元/单)' in df.columns:
         fig.add_trace(go.Bar(x=df.index, y=df['均单利润(元/单)'], name='均单利润', marker_color='#FF6347',
                              text=df['均单利润(元/单)'].apply(lambda x: f"¥{x:.2f}"), textposition='outside'))
+    
     fig.update_layout(title=title, barmode='group', height=600)
     return fig
 
@@ -589,14 +633,14 @@ def render_monthly_analysis(metrics, df):
         st.subheader("🏪 店铺分析")
         shop_df = pd.DataFrame(metrics["店铺数据"]).T
         shop_df['店铺数量'] = shop_df['店铺数量'].astype(int)
-        if metrics["has_sales_quantity"]:
+        if metrics["has_sales_quantity"] and '销售数量' in shop_df.columns:
             shop_df['销售数量'] = shop_df['销售数量'].fillna(0).astype(int)
-        shops = st.multiselect("选择店铺", list(shop_df.index), default=list(shop_df.index)[:5])
+        shops = st.multiselect("选择店铺", list(shop_df.index), default=list(shop_df.index)[:5] if len(shop_df) >= 5 else list(shop_df.index))
         if shops:
             st.dataframe(highlight_threshold_values(shop_df.loc[shops], st.session_state.alert_config), use_container_width=True)
             st.plotly_chart(plot_margin_chart(shop_df, '订单毛利率(%)', '店铺订单毛利率', 'ORDER_MARGIN_RATE_THRESHOLD', shops), use_container_width=True)
             st.plotly_chart(plot_cost_ratio_chart(shop_df, '店铺成本占比', shops), use_container_width=True)
-            if metrics["has_sales_quantity"]:
+            if metrics["has_sales_quantity"] and '销售数量' in shop_df.columns:
                 st.plotly_chart(plot_sales_quantity_chart(shop_df, '店铺销售数量排名', shops), use_container_width=True)
                 st.plotly_chart(plot_sales_unit_metrics_chart(shop_df, '店铺单均指标', shops), use_container_width=True)
                 st.plotly_chart(plot_unit_metrics_chart(shop_df, '店铺客单价&均单利润对比', shops), use_container_width=True)
@@ -604,14 +648,15 @@ def render_monthly_analysis(metrics, df):
     if metrics["sales_data"]:
         st.subheader("👨‍💼 销售员分析")
         sales_df = pd.DataFrame(metrics["sales_data"]).T
-        sales_df['店铺数量'] = sales_df['店铺数量'].astype(int) if '店铺数量' in sales_df.columns else 1
-        if metrics["has_sales_quantity"]:
+        if '店铺数量' in sales_df.columns:
+            sales_df['店铺数量'] = sales_df['店铺数量'].astype(int)
+        if metrics["has_sales_quantity"] and '销售数量' in sales_df.columns:
             sales_df['销售数量'] = sales_df['销售数量'].fillna(0).astype(int)
-        sales = st.multiselect("选择销售员", list(sales_df.index), default=list(sales_df.index)[:5])
+        sales = st.multiselect("选择销售员", list(sales_df.index), default=list(sales_df.index)[:5] if len(sales_df) >= 5 else list(sales_df.index))
         if sales:
             st.dataframe(highlight_threshold_values(sales_df.loc[sales], st.session_state.alert_config), use_container_width=True)
             st.plotly_chart(plot_cost_ratio_chart(sales_df, '销售员成本占比', sales), use_container_width=True)
-            if metrics["has_sales_quantity"]:
+            if metrics["has_sales_quantity"] and '销售数量' in sales_df.columns:
                 st.plotly_chart(plot_sales_quantity_chart(sales_df, '销售员销量排名', sales), use_container_width=True)
                 st.plotly_chart(plot_sales_unit_metrics_chart(sales_df, '销售员单均指标', sales), use_container_width=True)
                 st.plotly_chart(plot_unit_metrics_chart(sales_df, '销售员客单价&均单利润对比', sales), use_container_width=True)
@@ -626,6 +671,8 @@ def render_monthly_analysis(metrics, df):
                 uprof_thresh = st.session_state.alert_config["UNIT_PROFIT_THRESHOLD"]
                 o_rate = row.get('订单毛利率(%)', 0)
                 op_rate = row.get('运营毛利率(%)', 0)
+                fine = row.get('罚款占收入比(%)', 0)
+                
                 if o_rate < o_thresh:
                     st.warning(f"订单毛利率{o_rate:.2f}% 不达标（标准{o_thresh}%）")
                 else:
@@ -634,6 +681,8 @@ def render_monthly_analysis(metrics, df):
                     st.warning(f"运营毛利率{op_rate:.2f}% 不达标（标准{op_thresh}%）")
                 else:
                     st.success(f"运营毛利率{op_rate:.2f}% 达标（标准{op_thresh}%）")
+                if fine > 0:
+                    st.info(f"罚款占收入比{fine:.2f}%，需减少违规订单")
                 if metrics["has_sales_quantity"]:
                     qty = row.get('销售数量', 0)
                     unit_price = row.get('客单价(元/单)', 0)
@@ -736,6 +785,9 @@ def render_double_month_analysis(curr, last, curr_df, last_df):
 
 def render_shop_margin_ranking(curr, last):
     st.subheader("🏪 店铺运营毛利增长排名")
+    if not curr.get("店铺数据") or not last.get("店铺数据"):
+        st.info("⚠️ 无店铺数据")
+        return
     shop_curr = pd.DataFrame(curr["店铺数据"]).T
     shop_last = pd.DataFrame(last["店铺数据"]).T
     common = list(set(shop_curr.index) & set(shop_last.index))
@@ -754,6 +806,9 @@ def render_shop_margin_ranking(curr, last):
 
 def render_sales_margin_ranking(curr, last):
     st.subheader("👨‍💼 销售员运营毛利增长排名")
+    if not curr.get("sales_data") or not last.get("sales_data"):
+        st.info("⚠️ 无销售员数据")
+        return
     sales_curr = pd.DataFrame(curr["sales_data"]).T
     sales_last = pd.DataFrame(last["sales_data"]).T
     common = list(set(sales_curr.index) & set(sales_last.index))
@@ -816,10 +871,8 @@ def main():
         metrics_current = calculate_metrics(df_current, "本月")
         metrics_last = calculate_metrics(df_last, "上月")
         render_double_month_analysis(metrics_current, metrics_last, df_current, df_last)
-        if metrics_current.get("店铺数据") and metrics_last.get("店铺数据"):
-            render_shop_margin_ranking(metrics_current, metrics_last)
-        if metrics_current.get("sales_data") and metrics_last.get("sales_data"):
-            render_sales_margin_ranking(metrics_current, metrics_last)
+        render_shop_margin_ranking(metrics_current, metrics_last)
+        render_sales_margin_ranking(metrics_current, metrics_last)
 
 if __name__ == "__main__":
     main()
